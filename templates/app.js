@@ -42,6 +42,10 @@ const App = {
       certificate.value = event.target.files[0];
     }
 
+    function handleLogout() {
+      window.location.href = '/logout';
+    }
+
     return {
       certificate,
       password,
@@ -50,12 +54,21 @@ const App = {
       loading,
       handleSubmit,
       handleFileChange,
+      handleLogout,
     };
   },
   template: `
     <div class="min-h-screen bg-gray-100 p-6">
       <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-md p-6">
-        <h1 class="text-2xl font-bold mb-6">Consulta de Notas Fiscais Eletrônicas</h1>
+        <div class="flex justify-between items-center mb-6">
+          <h1 class="text-2xl font-bold">Consulta de Notas Fiscais Eletrônicas</h1>
+          <button
+            @click="handleLogout"
+            class="bg-red-600 text-white py-1 px-3 rounded-md hover:bg-red-700"
+          >
+            Sair
+          </button>
+        </div>
         <div class="mb-6">
           <label class="block text-sm font-medium text-gray-700 mb-2">
             Certificado Digital (.pfx)
@@ -119,3 +132,4 @@ const App = {
 };
 
 createApp(App).mount('#app');
+

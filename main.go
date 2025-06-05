@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -199,10 +198,9 @@ func indexHandler() http.HandlerFunc {
 		}
 
 		// Carrega o JavaScript do arquivo
-		jsPath := filepath.Join("templates", "app.js")
-		jsContent, err := os.ReadFile(jsPath)
+		jsContent, err := os.ReadFile("templates/app.js")
 		if err != nil {
-			log.Printf("Erro ao ler arquivo %s: %v", jsPath, err)
+			log.Printf("Erro ao ler arquivo app.js: %v", err)
 			http.Error(w, fmt.Sprintf("Erro ao ler arquivo JavaScript: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -236,4 +234,4 @@ func main() {
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatalf("Erro ao iniciar o servidor: %v", err)
 	}
-}
+} // End of main
