@@ -5,13 +5,11 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io"
+	"html/template"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"strings"
-
-	"github.com/gorilla/mux"
 )
 
 // Config contém as configurações do sistema
@@ -28,10 +26,9 @@ type NFeResponse struct {
 	DataEmissao string `json:"data_emissao,omitempty"`
 }
 
-// UploadRequest representa a requisição de upload
-type UploadRequest struct {
-	CertFile     io.Reader
-	CertPassword string
+// TemplateData contém dados para renderizar o template HTML
+type TemplateData struct {
+	Title string
 }
 
 // loadCertificate carrega o certificado digital A1 do arquivo .pfx
@@ -103,7 +100,6 @@ func consultNFe(client *http.Client, sefazURL, chaveNFe string) (NFeResponse, er
 	}
 
 	// Simulação de parsing (substitua por parsing real do XML retornado)
-	// Aqui, retornamos dados fictícios para demonstração
 	nfe := NFeResponse{
 		ChaveNFe:    chaveNFe,
 		Status:      "Autorizada",
@@ -122,14 +118,17 @@ func consultNFe(client *http.Client, sefazURL, chaveNFe string) (NFeResponse, er
 // uploadHandler lida com o upload do certificado e consulta de NF-e
 func uploadHandler(config Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Parseia o formulário multipart
+		if r.Method != http.MethodPost {
+			http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
+			return
+		}
+
 		err := r.ParseMultipartForm(10 << 20) // 10 MB
 		if err != nil {
 			http.Error(w, "Erro ao parsear formulário", http.StatusBadRequest)
 			return
 		}
 
-		// Obtém o arquivo do certificado
 		file, _, err := r.FormFile("certificate")
 		if err != nil {
 			http.Error(w, "Erro ao obter certificado", http.StatusBadRequest)
@@ -137,37 +136,32 @@ func uploadHandler(config Config) http.HandlerFunc {
 		}
 		defer file.Close()
 
-		// Lê o conteúdo do arquivo
 		certData, err := ioutil.ReadAll(file)
 		if err != nil {
 			http.Error(w, "Erro ao ler certificado", http.StatusBadRequest)
 			return
 		}
 
-		// Obtém a senha
 		certPassword := r.FormValue("password")
 		if certPassword == "" {
 			http.Error(w, "Senha do certificado é obrigatória", http.StatusBadRequest)
 			return
 		}
 
-		// Carrega o certificado
 		cert, err := loadCertificate(certData, certPassword)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Erro ao carregar certificado: %v", err), http.StatusBadRequest)
 			return
 		}
 
-		// Cria o cliente HTTP com o certificado
 		client := createTLSClient(cert)
 
-		// Simula consulta de múltiplas NF-e (substitua por chaves reais)
 		chavesNFe := []string{
 			"35230612345678901234567890123456789012345678",
 			"35230698765432109876543210987654321098765432",
 		}
 
-		var AscertainableList (nfeResponses)
+		var nfeResponses []NFeResponse
 		for _, chave := range chavesNFe {
 			nfe, err := consultNFe(client, config.SefazURL, chave)
 			if err != nil {
@@ -177,9 +171,176 @@ func uploadHandler(config Config) http.HandlerFunc {
 			nfeResponses = append(nfeResponses, nfe)
 		}
 
-		// Retorna a resposta em JSON
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(nfeResponses)
+		if err := json.NewEncoder(w).Encode(nfeResponses); err != nil {
+			http.Error(w, "Erro ao codificar resposta JSON", http.StatusInternalServerError)
+			return
+		}
+	}
+}
+
+// indexHandler renderiza o template HTML
+func indexHandler() http.HandlerFunc {
+	// Define o template HTML com React
+	const htmlTemplate = `
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{.Title}}</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/babel-standalone@6.26.0/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    function App() {
+      const [certificate, setCertificate] = React.useState(null);
+      const [password, setPassword] = React.useState('');
+      const [nfeList, setNfeList] = React.useState([]);
+      const [error, setError] = React.useState(null);
+      const [loading, setLoading] = React.useState(false);
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setError(null);
+
+        const formData = new FormData();
+        formData.append('certificate', certificate);
+        formData.append('password', password);
+
+        try {
+          const response = await fetch('/upload', {
+            method: 'POST',
+            body: formData,
+          });
+          if (!response.ok) {
+            throw new Error('Erro ao consultar NF-e');
+          }
+          const data = await response.json();
+          setNfeList(data);
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div className="min-h-screen bg-gray-100 p-6">
+          <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-md p-6">
+            <h1 className="text-2xl font-bold mb-6">Consulta de Notas Fiscais Eletrônicas</h1>
+            
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Certificado Digital (.pfx)
+              </label>
+              <input
+                type="file"
+                accept=".pfx"
+                onChange={(e) => setCertificate(e.target.files[0])}
+                className="block w-full text-sm text-gray-500
+                  file:mr-4 file:py-2 file:px-4
+                  file:rounded-md file:border-0
+                  file:text-sm file:font-semibold
+                  file:bg-blue-50 file:text-blue-700
+                  hover:file:bg-blue-100"
+              />
+            </div>
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Senha do Certificado
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+                placeholder="Digite a senha"
+              />
+            </div>
+            <button
+              onClick={handleSubmit}
+              disabled={!certificate || !password || loading}
+              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400"
+            >
+              {loading ? 'Consultando...' : 'Consultar NF-e'}
+            </button>
+
+            {error && (
+              <div className="mt-4 p-4 bg-red-100 text-red-700 rounded-md">
+                {error}
+              </div>
+            )}
+
+            {nfeList.length > 0 && (
+              <div className="mt-6">
+                <h2 className="text-xl font-semibold mb-4">Resultados</h2>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chave NF-e</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Descrição</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Emitente</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data de Emissão</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {nfeList.map((nfe) => (
+                        <tr key={nfe.chave_nfe}>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{nfe.chave_nfe}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{nfe.status}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{nfe.descricao}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{nfe.emitente}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{nfe.data_emissao}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
+`
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Parseia o template
+		tmpl, err := template.New("index").Parse(htmlTemplate)
+		if err != nil {
+			http.Error(w, "Erro ao parsear template", http.StatusInternalServerError)
+			return
+		}
+
+		// Dados para o template
+		data := TemplateData{
+			Title: "Consulta NF-e",
+		}
+
+		// Renderiza o template
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := tmpl.Execute(w, data); err != nil {
+			http.Error(w, "Erro ao renderizar template", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -188,9 +349,12 @@ func main() {
 		SefazURL: "https://nfe.sefazrs.rs.gov.br/ws/NfeConsulta/NfeConsulta4.asmx",
 	}
 
-	router := mux.NewRouter()
-	router.HandleFunc("/upload", uploadHandler(config)).Methods("POST")
+	// Configura os endpoints
+	http.HandleFunc("/", indexHandler())
+	http.HandleFunc("/upload", uploadHandler(config))
 
 	log.Println("Servidor rodando na porta 8080...")
-	http.ListenAndServe(":8080", router)
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatalf("Erro ao iniciar o servidor: %v", err)
+	}
 }
