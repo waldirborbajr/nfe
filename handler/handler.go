@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
-	"encoding/pem"
 	"encoding/xml"
 	"fmt"
 	"html/template"
@@ -82,15 +81,12 @@ func generateCSRFToken() string {
 
 // loadCertificate loads the A1 digital certificate
 func loadCertificate(certData []byte, certPassword string) (*tls.Certificate, error) {
-	block, _ := pem.Decode(certData)
-	if block == nil {
-		cert, err := tls.X509KeyPair(certData, []byte(certPassword))
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode .pfx certificate: %v", err)
-		}
-		return &cert, nil
+	// Simplified for example; replace with actual certificate parsing logic
+	cert, err := tls.X509KeyPair(certData, []byte(certPassword))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode .pfx certificate: %v", err)
 	}
-	return nil, fmt.Errorf("unsupported certificate format")
+	return &cert, nil
 }
 
 // createTLSClient creates an HTTP client with certificate
@@ -168,14 +164,22 @@ func consultNFe(client *http.Client, sefazURL, chaveNFe string) (entity.NFeRespo
 // UploadHandler handles certificate upload and NF-e consultation
 func UploadHandler(config entity.Config, db *database.DBConn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if db == nil {
+			log.Println("UploadHandler: Database connection is nil")
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
 		// Check authentication
 		sessionID, err := r.Cookie("session_id")
 		if err != nil || sessionID == nil {
+			log.Printf("UploadHandler: No session cookie: %v", err)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 		session, err := db.GetSession(sessionID.Value)
-		if err != nil {
+		if err != nil || session == nil {
+			log.Printf("UploadHandler: Invalid session: %v", err)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -188,18 +192,21 @@ func UploadHandler(config entity.Config, db *database.DBConn) http.HandlerFunc {
 		// Validate CSRF token
 		csrfToken := r.FormValue("csrf_token")
 		if csrfToken != session.CSRFToken {
+			log.Printf("UploadHandler: Invalid CSRF token: %s", csrfToken)
 			http.Error(w, "Invalid CSRF token", http.StatusForbidden)
 			return
 		}
 
 		err = r.ParseMultipartForm(10 << 20) // 10 MB
 		if err != nil {
+			log.Printf("UploadHandler: Error parsing form: %v", err)
 			http.Error(w, "Erro ao parsear formulário", http.StatusBadRequest)
 			return
 		}
 
 		file, _, err := r.FormFile("certificate")
 		if err != nil {
+			log.Printf("UploadHandler: Error getting certificate: %v", err)
 			http.Error(w, "Erro ao obter certificado", http.StatusBadRequest)
 			return
 		}
@@ -207,18 +214,21 @@ func UploadHandler(config entity.Config, db *database.DBConn) http.HandlerFunc {
 
 		certData, err := io.ReadAll(file)
 		if err != nil {
+			log.Printf("UploadHandler: Error reading certificate: %v", err)
 			http.Error(w, "Erro ao ler certificado", http.StatusBadRequest)
 			return
 		}
 
 		certPassword, err := validateInput(r.FormValue("password"), "senha do certificado", 50)
 		if err != nil {
+			log.Printf("UploadHandler: Invalid password: %v", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
 		cert, err := loadCertificate(certData, certPassword)
 		if err != nil {
+			log.Printf("UploadHandler: Error loading certificate: %v", err)
 			http.Error(w, fmt.Sprintf("Erro ao carregar certificado: %v", err), http.StatusBadRequest)
 			return
 		}
@@ -234,7 +244,7 @@ func UploadHandler(config entity.Config, db *database.DBConn) http.HandlerFunc {
 		for _, chave := range chavesNFe {
 			nfe, err := consultNFe(client, config.SefazURL, chave)
 			if err != nil {
-				log.Printf("Erro ao consultar NF-e %s: %v", chave, err)
+				log.Printf("UploadHandler: Error consulting NF-e %s: %v", chave, err)
 				continue
 			}
 			nfeResponses = append(nfeResponses, nfe)
@@ -242,6 +252,7 @@ func UploadHandler(config entity.Config, db *database.DBConn) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(nfeResponses); err != nil {
+			log.Printf("UploadHandler: Error encoding JSON: %v", err)
 			http.Error(w, "Erro ao codificar resposta JSON", http.StatusInternalServerError)
 			return
 		}
@@ -251,6 +262,12 @@ func UploadHandler(config entity.Config, db *database.DBConn) http.HandlerFunc {
 // LoginHandler renders the login template
 func LoginHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if db == nil {
+			log.Println("LoginHandler: Database connection is nil")
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -259,7 +276,7 @@ func LoginHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
 		// Check authentication
 		sessionID, err := r.Cookie("session_id")
 		if err == nil {
-			if _, err := db.GetSession(sessionID.Value); err == nil {
+			if session, err := db.GetSession(sessionID.Value); err == nil && session != nil {
 				http.Redirect(w, r, "/", http.StatusSeeOther)
 				return
 			}
@@ -267,15 +284,7 @@ func LoginHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
 
 		tmpl, err := template.ParseFiles("templates/login.html")
 		if err != nil {
-			log.Printf("Erro ao parsear template: %v", err)
-			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
-			return
-		}
-
-		jsPath := filepath.Join("templates", "login.js")
-		jsContent, err := os.ReadFile(jsPath)
-		if err != nil {
-			log.Printf("Erro ao ler arquivo %s: %v", jsPath, err)
+			log.Printf("LoginHandler: Error parsing template: %v", err)
 			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 			return
 		}
@@ -285,13 +294,12 @@ func LoginHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
 
 		data := entity.TemplateData{
 			Title:     "Login",
-			JS:        template.JS(jsContent),
 			CSRFToken: csrfToken,
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := tmpl.Execute(w, data); err != nil {
-			log.Printf("Erro ao renderizar template: %v", err)
+			log.Printf("LoginHandler: Error rendering template: %v", err)
 			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 			return
 		}
@@ -301,6 +309,12 @@ func LoginHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
 // LoginSubmitHandler processes login form submissions
 func LoginSubmitHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if db == nil {
+			log.Println("LoginSubmitHandler: Database connection is nil")
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -308,30 +322,35 @@ func LoginSubmitHandler(db *database.DBConn, config entity.Config) http.HandlerF
 
 		err := r.ParseForm()
 		if err != nil {
+			log.Printf("LoginSubmitHandler: Error parsing form: %v", err)
 			http.Error(w, "Erro ao parsear formulário", http.StatusBadRequest)
 			return
 		}
 
 		username, err := validateInput(r.FormValue("username"), "usuário", 50)
 		if err != nil {
+			log.Printf("LoginSubmitHandler: Invalid username: %v", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
 		password, err := validateInput(r.FormValue("password"), "senha", 50)
 		if err != nil {
+			log.Printf("LoginSubmitHandler: Invalid password: %v", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
 		csrfToken := r.FormValue("csrf_token")
 		if csrfToken == "" {
+			log.Println("LoginSubmitHandler: Missing CSRF token")
 			http.Error(w, "CSRF token inválido", http.StatusForbidden)
 			return
 		}
 
 		user, err := db.ValidateUser(username, password)
 		if err != nil {
+			log.Printf("LoginSubmitHandler: Invalid credentials: %v", err)
 			http.Error(w, "Usuário ou senha inválidos", http.StatusUnauthorized)
 			return
 		}
@@ -342,7 +361,7 @@ func LoginSubmitHandler(db *database.DBConn, config entity.Config) http.HandlerF
 		expiresAt := time.Now().Add(24 * time.Hour)
 		err = db.CreateSession(user.ID, sessionID, newCSRFToken, expiresAt)
 		if err != nil {
-			log.Printf("Erro ao criar sessão: %v", err)
+			log.Printf("LoginSubmitHandler: Error creating session: %v", err)
 			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 			return
 		}
@@ -365,6 +384,12 @@ func LoginSubmitHandler(db *database.DBConn, config entity.Config) http.HandlerF
 // LogoutHandler clears the session
 func LogoutHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if db == nil {
+			log.Println("LogoutHandler: Database connection is nil")
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -393,7 +418,16 @@ func LogoutHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
 // IndexHandler renders the main template
 func IndexHandler(db *database.DBConn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if db == nil {
+			log.Println("IndexHandler: Database connection is nil")
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("IndexHandler: Handling request for %s", r.URL.Path)
+
 		if r.Method != http.MethodGet {
+			log.Printf("IndexHandler: Method not allowed: %s", r.Method)
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -401,18 +435,21 @@ func IndexHandler(db *database.DBConn) http.HandlerFunc {
 		// Check authentication
 		sessionID, err := r.Cookie("session_id")
 		if err != nil || sessionID == nil {
+			log.Printf("IndexHandler: No session cookie: %v", err)
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
+
 		session, err := db.GetSession(sessionID.Value)
-		if err != nil {
+		if err != nil || session == nil {
+			log.Printf("IndexHandler: Invalid session: %v", err)
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
 
 		tmpl, err := template.ParseFiles("templates/index.html")
 		if err != nil {
-			log.Printf("Erro ao parsear template: %v", err)
+			log.Printf("IndexHandler: Error parsing template: %v", err)
 			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 			return
 		}
@@ -424,7 +461,7 @@ func IndexHandler(db *database.DBConn) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := tmpl.Execute(w, data); err != nil {
-			log.Printf("Erro ao renderizar template: %v", err)
+			log.Printf("IndexHandler: Error rendering template: %v", err)
 			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 			return
 		}
@@ -434,14 +471,22 @@ func IndexHandler(db *database.DBConn) http.HandlerFunc {
 // ImportNFeHandler handles XML file listing and importing
 func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if db == nil {
+			log.Println("ImportNFeHandler: Database connection is nil")
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+
 		// Check authentication
 		sessionID, err := r.Cookie("session_id")
 		if err != nil || sessionID == nil {
+			log.Printf("ImportNFeHandler: No session cookie: %v", err)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 		session, err := db.GetSession(sessionID.Value)
-		if err != nil {
+		if err != nil || session == nil {
+			log.Printf("ImportNFeHandler: Invalid session: %v", err)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -451,7 +496,7 @@ func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
 
 		// Create done directory
 		if err := os.MkdirAll(doneDir, 0755); err != nil {
-			log.Printf("Erro ao criar diretório done: %v", err)
+			log.Printf("ImportNFeHandler: Error creating done directory: %v", err)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
@@ -460,7 +505,7 @@ func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
 			// List XML files
 			files, err := os.ReadDir(downloadsDir)
 			if err != nil {
-				log.Printf("Erro ao listar arquivos: %v", err)
+				log.Printf("ImportNFeHandler: Error reading files: %v", err)
 				http.Error(w, "Error reading files", http.StatusInternalServerError)
 				return
 			}
@@ -474,7 +519,7 @@ func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
 
 			w.Header().Set("Content-Type", "application/json")
 			if err := json.NewEncoder(w).Encode(xmlFiles); err != nil {
-				log.Printf("Erro ao encodear JSON: %v", err)
+				log.Printf("ImportNFeHandler: Error encoding JSON: %v", err)
 				http.Error(w, "Error encoding JSON", http.StatusInternalServerError)
 				return
 			}
@@ -484,6 +529,7 @@ func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
 		if r.Method == http.MethodPost {
 			// Validate CSRF token
 			if r.Header.Get("Content-Type") != "application/json" {
+				log.Println("ImportNFeHandler: Invalid Content-Type")
 				http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
 				return
 			}
@@ -493,11 +539,13 @@ func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
 				CSRFToken string   `json:"csrf_token"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				log.Printf("ImportNFeHandler: Invalid JSON: %v", err)
 				http.Error(w, "Invalid JSON", http.StatusBadRequest)
 				return
 			}
 
 			if req.CSRFToken != session.CSRFToken {
+				log.Printf("ImportNFeHandler: Invalid CSRF token: %s", req.CSRFToken)
 				http.Error(w, "Invalid CSRF token", http.StatusForbidden)
 				return
 			}
@@ -512,7 +560,7 @@ func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
 				// Read XML
 				data, err := os.ReadFile(filePath)
 				if err != nil {
-					log.Printf("Erro ao ler %s: %v", fileName, err)
+					log.Printf("ImportNFeHandler: Error reading %s: %v", fileName, err)
 					results = append(results, fmt.Sprintf("Erro ao ler %s", fileName))
 					continue
 				}
@@ -520,7 +568,7 @@ func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
 				// Parse XML
 				var nfe entity.NFe
 				if err := xml.Unmarshal(data, &nfe); err != nil {
-					log.Printf("Erro ao parsear %s: %v", fileName, err)
+					log.Printf("ImportNFeHandler: Error parsing %s: %v", fileName, err)
 					results = append(results, fmt.Sprintf("Erro ao parsear %s", fileName))
 					continue
 				}
@@ -528,12 +576,12 @@ func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
 				// Check for duplicate
 				exists, err := db.NFeExists(nfe.InfNFe.ID)
 				if err != nil {
-					log.Printf("Erro ao verificar NF-e %s: %v", nfe.InfNFe.ID, err)
+					log.Printf("ImportNFeHandler: Error checking NF-e %s: %v", nfe.InfNFe.ID, err)
 					results = append(results, fmt.Sprintf("Erro ao processar %s", fileName))
 					continue
 				}
 				if exists {
-					log.Printf("NF-e %s já existe", nfe.InfNFe.ID)
+					log.Printf("ImportNFeHandler: NF-e %s already exists", nfe.InfNFe.ID)
 					results = append(results, fmt.Sprintf("%s já importado", fileName))
 					continue
 				}
@@ -586,14 +634,19 @@ func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
 				}
 
 				if err := db.InsertNFeHeader(header); err != nil {
-					log.Printf("Erro ao inserir header %s: %v", fileName, err)
+					log.Printf("ImportNFeHandler: Error inserting header %s: %v", fileName, err)
 					results = append(results, fmt.Sprintf("Erro ao importar %s", fileName))
 					continue
 				}
 
 				// Insert items
 				for _, det := range nfe.InfNFe.Det {
-					nItem, _ := strconv.Atoi(det.NItem)
+					nItem, err := strconv.Atoi(det.NItem)
+					if err != nil {
+						log.Printf("ImportNFeHandler: Invalid item number %s: %v", det.NItem, err)
+						results = append(results, fmt.Sprintf("Erro ao processar item %s", fileName))
+						continue
+					}
 					item := &database.NFeItem{
 						NFeID:   nfe.InfNFe.ID,
 						NItem:   nItem,
@@ -614,7 +667,7 @@ func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
 					}
 
 					if err := db.InsertNFeItem(item); err != nil {
-						log.Printf("Erro ao inserir item %s: %d: %v", fileName, nItem, err)
+						log.Printf("ImportNFeHandler: Error inserting item %s: %d: %v", fileName, nItem, err)
 						results = append(results, fmt.Sprintf("Erro ao importar item %s", fileName))
 						continue
 					}
@@ -622,7 +675,7 @@ func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
 
 				// Move file to done
 				if err := os.Rename(filePath, donePath); err != nil {
-					log.Printf("Erro ao mover %s: %v", fileName, err)
+					log.Printf("ImportNFeHandler: Error moving %s: %v", fileName, err)
 					results = append(results, fmt.Sprintf("Erro ao mover %s", fileName))
 					continue
 				}
@@ -634,7 +687,7 @@ func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
 			if err := json.NewEncoder(w).Encode(map[string]interface{}{
 				"results": results,
 			}); err != nil {
-				log.Printf("Erro ao encodear JSON: %v", err)
+				log.Printf("ImportNFeHandler: Error encoding JSON: %v", err)
 				http.Error(w, "Error encoding JSON", http.StatusInternalServerError)
 				return
 			}
