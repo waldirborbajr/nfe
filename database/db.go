@@ -2,102 +2,181 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
 
-// DBConn holds the database connection
+// DBConn represents a database connection
 type DBConn struct {
 	db *sql.DB
 }
 
 // User represents a user in the database
 type User struct {
-	ID      int
-	Usuario string
-	Senha   string // Hashed password
+	ID       int
+	Username string
+	Password string
+}
+
+// Session represents a user session
+type Session struct {
+	ID        string
+	UserID    int
+	CSRFToken string
+	ExpiresAt time.Time
 }
 
 // NewDBConn initializes a new SQLite database connection
 func NewDBConn(dbPath string) (*DBConn, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open database: %v", err)
 	}
 
 	// Create users table if it doesn't exist
-	createTableSQL := `
+	createUsersTableSQL := `
 	CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		usuario TEXT NOT NULL UNIQUE,
-		senha TEXT NOT NULL
-	);`
-	_, err = db.Exec(createTableSQL)
+		username TEXT NOT NULL UNIQUE,
+		password TEXT NOT NULL
+	);
+	`
+	_, err = db.Exec(createUsersTableSQL)
 	if err != nil {
 		db.Close()
-		return nil, err
+		return nil, fmt.Errorf("failed to create users table: %v", err)
 	}
 
-	// Insert default user if not exists (for testing)
-	defaultUser := User{
-		Usuario: "admin",
-		Senha:   "admin123", // Will be hashed
-	}
-	err = insertDefaultUser(db, defaultUser)
+	// Check if username column exists and add it if missing
+	var columnExists bool
+	err = db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM pragma_table_info('users')
+			WHERE name = 'username'
+		)
+	`).Scan(&columnExists)
 	if err != nil {
 		db.Close()
-		return nil, err
+		return nil, fmt.Errorf("failed to check username column: %v", err)
+	}
+	if !columnExists {
+		_, err = db.Exec("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''")
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to add username column: %v", err)
+		}
+		// Ensure uniqueness constraint (SQLite doesn't support adding UNIQUE via ALTER, so recreate table if needed)
+		// For simplicity, we'll enforce uniqueness in application logic for existing users
+	}
+
+	// Create sessions table if it doesn't exist
+	createSessionsTableSQL := `
+	CREATE TABLE IF NOT EXISTS sessions (
+		id TEXT PRIMARY KEY,
+		user_id INTEGER NOT NULL,
+		csrf_token TEXT NOT NULL,
+		expires_at DATETIME NOT NULL,
+		FOREIGN KEY (user_id) REFERENCES users(id)
+	);
+	`
+	_, err = db.Exec(createSessionsTableSQL)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to create sessions table: %v", err)
+	}
+
+	// Insert default admin user if not exists
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to hash password: %v", err)
+	}
+	_, err = db.Exec("INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)", "admin", string(hashedPassword))
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to insert default user: %v", err)
+	}
+
+	// Update empty usernames to 'admin' for default user (in case column was just added)
+	_, err = db.Exec("UPDATE users SET username = 'admin' WHERE username = '' AND password = ?", string(hashedPassword))
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to update default user username: %v", err)
 	}
 
 	return &DBConn{db: db}, nil
 }
 
 // Close closes the database connection
-func (conn *DBConn) Close() error {
-	return conn.db.Close()
+func (c *DBConn) Close() error {
+	return c.db.Close()
 }
 
-// insertDefaultUser inserts a default user if it doesn't exist
-func insertDefaultUser(db *sql.DB, user User) error {
-	// Check if user exists
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM users WHERE usuario = ?", user.Usuario).Scan(&count)
-	if err != nil {
-		return err
-	}
-	if count > 0 {
-		return nil // User already exists
-	}
-
-	// Hash password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Senha), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-
-	// Insert user
-	_, err = db.Exec("INSERT INTO users (usuario, senha) VALUES (?, ?)", user.Usuario, hashedPassword)
-	return err
-}
-
-// ValidateUser checks if the provided credentials are valid
-func (conn *DBConn) ValidateUser(usuario, senha string) (User, error) {
+// ValidateUser validates user login credentials
+func (c *DBConn) ValidateUser(username, password string) (*User, error) {
 	var user User
-	err := conn.db.QueryRow("SELECT id, usuario, senha FROM users WHERE usuario = ?", usuario).Scan(&user.ID, &user.Usuario, &user.Senha)
+	err := c.db.QueryRow("SELECT id, username, password FROM users WHERE username = ?", username).Scan(&user.ID, &user.Username, &user.Password)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return User{}, fmt.Errorf("usuário não encontrado")
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("invalid username or password")
 		}
-		return User{}, err
+		return nil, fmt.Errorf("failed to query user: %v", err)
 	}
 
-	// Compare hashed password
-	err = bcrypt.CompareHashAndPassword([]byte(user.Senha), []byte(senha))
+	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
 	if err != nil {
-		return User{}, fmt.Errorf("senha incorreta")
+		return nil, errors.New("invalid username or password")
 	}
 
-	return user, nil
+	return &user, nil
+}
+
+// CreateSession creates a new session
+func (c *DBConn) CreateSession(userID int, sessionID, csrfToken string, expiresAt time.Time) error {
+	_, err := c.db.Exec("INSERT INTO sessions (id, user_id, csrf_token, expires_at) VALUES (?, ?, ?, ?)",
+		sessionID, userID, csrfToken, expiresAt)
+	if err != nil {
+		return fmt.Errorf("failed to create session: %v", err)
+	}
+	return nil
+}
+
+// GetSession retrieves a session by ID
+func (c *DBConn) GetSession(sessionID string) (*Session, error) {
+	var session Session
+	err := c.db.QueryRow("SELECT id, user_id, csrf_token, expires_at FROM sessions WHERE id = ?", sessionID).
+		Scan(&session.ID, &session.UserID, &session.CSRFToken, &session.ExpiresAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("session not found")
+		}
+		return nil, fmt.Errorf("failed to query session: %v", err)
+	}
+	if session.ExpiresAt.Before(time.Now()) {
+		return nil, errors.New("session expired")
+	}
+	return &session, nil
+}
+
+// DeleteSession removes a session
+func (c *DBConn) DeleteSession(sessionID string) error {
+	_, err := c.db.Exec("DELETE FROM sessions WHERE id = ?", sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to delete session: %v", err)
+	}
+	return nil
+}
+
+// CleanupExpiredSessions removes expired sessions
+func (c *DBConn) CleanupExpiredSessions() error {
+	_, err := c.db.Exec("DELETE FROM sessions WHERE expires_at < ?", time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to cleanup expired sessions: %v", err)
+	}
+	return nil
 }

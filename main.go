@@ -12,17 +12,17 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
-	// Import your database package
-	database "github.com/waldirborbajr/nfe/database" // Adjust the import path as needed
+	db "github.com/waldirborbajr/nfe/database"
 )
 
 // Config contém as configurações do sistema
 type Config struct {
-	SefazURL string // URL do webservice da SEFAZ (exemplo: SVRS)
+	SefazURL string // URL do webservice da SEFAZ
 }
 
 // NFeResponse representa a resposta da API com informações da NF-e
@@ -36,58 +36,38 @@ type NFeResponse struct {
 
 // TemplateData contém dados para renderizar o template HTML
 type TemplateData struct {
-	Title string
-	JS    template.JS // Para o código JavaScript
-	CSRF  string      // CSRF token for login form
+	Title     string
+	JS        template.JS // Para o código JavaScript
+	CSRFToken string      // CSRF token
 }
 
-// Session stores user session data
-type Session struct {
-	UserID    int
-	ExpiresAt time.Time
+// secureHeadersMiddleware adiciona cabeçalhos de segurança
+func secureHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' https://cdn.tailwindcss.com; img-src 'self'; connect-src 'self'")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
+		next.ServeHTTP(w, r)
+	})
 }
 
-// SessionStore manages in-memory sessions
-type SessionStore struct {
-	sessions map[string]Session
-	mu       sync.RWMutex
-}
-
-// NewSessionStore initializes a new session store
-func NewSessionStore() *SessionStore {
-	return &SessionStore{
-		sessions: make(map[string]Session),
+// validateInput sanitizes and validates input
+func validateInput(input string, field string, maxLength int) (string, error) {
+	input = strings.TrimSpace(input)
+	if len(input) == 0 {
+		return "", fmt.Errorf("%s é obrigatório", field)
 	}
-}
-
-// CreateSession creates a new session
-func (s *SessionStore) CreateSession(userID int) (string, error) {
-	sessionID := generateSessionID()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.sessions[sessionID] = Session{
-		UserID:    userID,
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+	if len(input) > maxLength {
+		return "", fmt.Errorf("%s muito longo (máximo %d caracteres)", field, maxLength)
 	}
-	return sessionID, nil
-}
-
-// GetSession retrieves a session by ID
-func (s *SessionStore) GetSession(sessionID string) (Session, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	session, exists := s.sessions[sessionID]
-	if !exists || session.ExpiresAt.Before(time.Now()) {
-		return Session{}, false
+	// Basic injection check (extend as needed)
+	if regexp.MustCompile(`[<>'";]`).MatchString(input) {
+		return "", fmt.Errorf("caracteres inválidos em %s", field)
 	}
-	return session, true
-}
-
-// DeleteSession removes a session
-func (s *SessionStore) DeleteSession(sessionID string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.sessions, sessionID)
+	return input, nil
 }
 
 // generateSessionID creates a random session ID
@@ -95,39 +75,37 @@ func generateSessionID() string {
 	b := make([]byte, 32)
 	_, err := rand.Read(b)
 	if err != nil {
-		log.Printf("Erro ao gerar session ID: %v", err)
-		return ""
+		log.Fatalf("Erro ao gerar session ID: %v", err)
 	}
 	return fmt.Sprintf("%x", b)
 }
 
-// generateCSRFToken creates a simple CSRF token
+// generateCSRFToken creates a random CSRF token
 func generateCSRFToken() string {
-	b := make([]byte, 16)
+	b := make([]byte, 32)
 	_, err := rand.Read(b)
 	if err != nil {
-		log.Printf("Erro ao gerar CSRF token: %v", err)
-		return ""
+		log.Fatalf("Erro ao gerar CSRF token: %v", err)
 	}
 	return fmt.Sprintf("%x", b)
 }
 
-// loadCertificate carrega o certificado digital A1 do arquivo .pfx
+// loadCertificate carrega o certificado digital A1
 func loadCertificate(certData []byte, certPassword string) (*tls.Certificate, error) {
 	// Decodifica o arquivo .pfx
 	block, _ := pem.Decode(certData)
 	if block == nil {
-		// Se não for PEM, assume que é um .pfx puro
+		// Assume .pfx puro
 		cert, err := tls.X509KeyPair(certData, []byte(certPassword))
 		if err != nil {
-			return nil, fmt.Errorf("erro ao decodificar o certificado .pfx: %v", err)
+			return nil, fmt.Errorf("failed to decode .pfx certificate: %v", err)
 		}
 		return &cert, nil
 	}
-	return nil, fmt.Errorf("formato de certificado não suportado")
+	return nil, fmt.Errorf("unsupported certificate format")
 }
 
-// createTLSClient cria um cliente HTTP com o certificado digital
+// createTLSClient cria um cliente HTTP com certificado
 func createTLSClient(cert *tls.Certificate) *http.Client {
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{*cert},
@@ -140,8 +118,13 @@ func createTLSClient(cert *tls.Certificate) *http.Client {
 	}
 }
 
-// consultNFe realiza a consulta de uma NF-e no webservice da SEFAZ
+// consultNFe consulta uma NF-e no webservice da SEFAZ
 func consultNFe(client *http.Client, sefazURL, chaveNFe string) (NFeResponse, error) {
+	// Validate chaveNFe (44 digits)
+	if !regexp.MustCompile(`^\d{44}$`).MatchString(chaveNFe) {
+		return NFeResponse{}, fmt.Errorf("chave NF-e inválida")
+	}
+
 	soapRequest := `<?xml version="1.0" encoding="UTF-8"?>
 <soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
   <soap12:Header>
@@ -180,7 +163,7 @@ func consultNFe(client *http.Client, sefazURL, chaveNFe string) (NFeResponse, er
 		return NFeResponse{}, fmt.Errorf("erro ao ler resposta: %v", err)
 	}
 
-	// Simulação de parsing (substitua por parsing real do XML retornado)
+	// Simulação de parsing
 	nfe := NFeResponse{
 		ChaveNFe:    chaveNFe,
 		Status:      "Autorizada",
@@ -194,10 +177,10 @@ func consultNFe(client *http.Client, sefazURL, chaveNFe string) (NFeResponse, er
 	}
 
 	return nfe, nil
-} // End of consultNFe
+}
 
 // uploadHandler handles certificate upload and NF-e consultation
-func uploadHandler(config Config, sessions *SessionStore) http.HandlerFunc {
+func uploadHandler(config Config, db *db.DBConn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check authentication
 		sessionID, err := r.Cookie("session_id")
@@ -205,14 +188,21 @@ func uploadHandler(config Config, sessions *SessionStore) http.HandlerFunc {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		_, authenticated := sessions.GetSession(sessionID.Value)
-		if !authenticated {
+		session, err := db.GetSession(sessionID.Value)
+		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Validate CSRF token
+		csrfToken := r.FormValue("csrf_token")
+		if csrfToken != session.CSRFToken {
+			http.Error(w, "Invalid CSRF token", http.StatusForbidden)
 			return
 		}
 
@@ -235,9 +225,9 @@ func uploadHandler(config Config, sessions *SessionStore) http.HandlerFunc {
 			return
 		}
 
-		certPassword := r.FormValue("password")
-		if certPassword == "" {
-			http.Error(w, "Senha do certificado é obrigatória", http.StatusBadRequest)
+		certPassword, err := validateInput(r.FormValue("password"), "senha do certificado", 50)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -269,11 +259,11 @@ func uploadHandler(config Config, sessions *SessionStore) http.HandlerFunc {
 			http.Error(w, "Erro ao codificar resposta JSON", http.StatusInternalServerError)
 			return
 		}
-	} // End of inner function
-} // End of uploadHandler
+	}
+}
 
 // loginHandler renders the login template
-func loginHandler(sessions *SessionStore) http.HandlerFunc {
+func loginHandler(db *db.DBConn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -283,7 +273,7 @@ func loginHandler(sessions *SessionStore) http.HandlerFunc {
 		// Check if already authenticated
 		sessionID, err := r.Cookie("session_id")
 		if err == nil {
-			if _, authenticated := sessions.GetSession(sessionID.Value); authenticated {
+			if _, err := db.GetSession(sessionID.Value); err == nil {
 				http.Redirect(w, r, "/", http.StatusSeeOther)
 				return
 			}
@@ -292,7 +282,7 @@ func loginHandler(sessions *SessionStore) http.HandlerFunc {
 		tmpl, err := template.ParseFiles("templates/login.html")
 		if err != nil {
 			log.Printf("Erro ao parsear template: %v", err)
-			http.Error(w, fmt.Sprintf("Erro ao parsear template: %v", err), http.StatusInternalServerError)
+			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 			return
 		}
 
@@ -300,27 +290,30 @@ func loginHandler(sessions *SessionStore) http.HandlerFunc {
 		jsContent, err := os.ReadFile(jsPath)
 		if err != nil {
 			log.Printf("Erro ao ler arquivo %s: %v", jsPath, err)
-			http.Error(w, fmt.Sprintf("Erro ao ler arquivo JavaScript: %v", err), http.StatusInternalServerError)
+			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 			return
 		}
 
+		// Generate temporary CSRF token for login page
+		csrfToken := generateCSRFToken()
+
 		data := TemplateData{
-			Title: "Login",
-			JS:    template.JS(jsContent),
-			CSRF:  generateCSRFToken(),
+			Title:     "Login",
+			JS:        template.JS(jsContent),
+			CSRFToken: csrfToken,
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := tmpl.Execute(w, data); err != nil {
 			log.Printf("Erro ao renderizar template: %v", err)
-			http.Error(w, fmt.Sprintf("Erro ao renderizar template: %v", err), http.StatusInternalServerError)
+			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 			return
 		}
-	} // End of inner function
-} // End of loginHandler
+	}
+}
 
 // loginSubmitHandler processes login form submissions
-func loginSubmitHandler(db *database.DBConn, sessions *SessionStore) http.HandlerFunc {
+func loginSubmitHandler(db *db.DBConn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -333,26 +326,38 @@ func loginSubmitHandler(db *database.DBConn, sessions *SessionStore) http.Handle
 			return
 		}
 
-		usuario := r.FormValue("usuario")
-		senha := r.FormValue("senha")
-		csrf := r.FormValue("csrf")
-
-		// Basic CSRF check (in production, use a more robust solution)
-		if csrf == "" {
-			http.Error(w, "CSRF token inválido", http.StatusBadRequest)
+		username, err := validateInput(r.FormValue("usuario"), "usuário", 50)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		user, err := db.ValidateUser(usuario, senha)
+		password, err := validateInput(r.FormValue("senha"), "senha", 50)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Erro de login: %v", err), http.StatusUnauthorized)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		csrfToken := r.FormValue("csrf_token")
+		if csrfToken == "" {
+			http.Error(w, "CSRF token inválido", http.StatusForbidden)
+			return
+		}
+
+		user, err := db.ValidateUser(username, password)
+		if err != nil {
+			http.Error(w, "Usuário ou senha inválidos", http.StatusUnauthorized)
 			return
 		}
 
 		// Create session
-		sessionID, err := sessions.CreateSession(user.ID)
+		sessionID := generateSessionID()
+		newCSRFToken := generateCSRFToken()
+		expiresAt := time.Now().Add(24 * time.Hour)
+		err = db.CreateSession(user.ID, sessionID, newCSRFToken, expiresAt)
 		if err != nil {
-			http.Error(w, "Erro ao criar sessão", http.StatusInternalServerError)
+			log.Printf("Erro ao criar sessão: %v", err)
+			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 			return
 		}
 
@@ -362,16 +367,17 @@ func loginSubmitHandler(db *database.DBConn, sessions *SessionStore) http.Handle
 			Value:    sessionID,
 			Path:     "/",
 			HttpOnly: true,
-			Expires:  time.Now().Add(24 * time.Hour),
+			Secure:   true,
+			SameSite: http.SameSiteStrictMode,
+			Expires:  expiresAt,
 		})
 
-		// Redirect to main page
 		http.Redirect(w, r, "/", http.StatusSeeOther)
-	} // End of inner function
-} // End of loginSubmitHandler
+	}
+}
 
 // logoutHandler clears the session
-func logoutHandler(sessions *SessionStore) http.HandlerFunc {
+func logoutHandler(db *db.DBConn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -380,7 +386,7 @@ func logoutHandler(sessions *SessionStore) http.HandlerFunc {
 
 		sessionID, err := r.Cookie("session_id")
 		if err == nil {
-			sessions.DeleteSession(sessionID.Value)
+			db.DeleteSession(sessionID.Value)
 		}
 
 		// Clear cookie
@@ -389,15 +395,17 @@ func logoutHandler(sessions *SessionStore) http.HandlerFunc {
 			Value:    "",
 			Path:     "/",
 			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteStrictMode,
 			MaxAge:   -1,
 		})
 
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
-	} // End of inner function
-} // End of logoutHandler
+	}
+}
 
 // indexHandler renders the main template
-func indexHandler(sessions *SessionStore) http.HandlerFunc {
+func indexHandler(db *db.DBConn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -410,8 +418,8 @@ func indexHandler(sessions *SessionStore) http.HandlerFunc {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
-		_, authenticated := sessions.GetSession(sessionID.Value)
-		if !authenticated {
+		_, err = db.GetSession(sessionID.Value)
+		if err != nil {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
@@ -419,7 +427,7 @@ func indexHandler(sessions *SessionStore) http.HandlerFunc {
 		tmpl, err := template.ParseFiles("templates/index.html")
 		if err != nil {
 			log.Printf("Erro ao parsear template: %v", err)
-			http.Error(w, fmt.Sprintf("Erro ao parsear template: %v", err), http.StatusInternalServerError)
+			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 			return
 		}
 
@@ -427,7 +435,7 @@ func indexHandler(sessions *SessionStore) http.HandlerFunc {
 		jsContent, err := os.ReadFile(jsPath)
 		if err != nil {
 			log.Printf("Erro ao ler arquivo %s: %v", jsPath, err)
-			http.Error(w, fmt.Sprintf("Erro ao ler arquivo JavaScript: %v", err), http.StatusInternalServerError)
+			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 			return
 		}
 
@@ -439,11 +447,25 @@ func indexHandler(sessions *SessionStore) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := tmpl.Execute(w, data); err != nil {
 			log.Printf("Erro ao renderizar template: %v", err)
-			http.Error(w, fmt.Sprintf("Erro ao renderizar template: %v", err), http.StatusInternalServerError)
+			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 			return
 		}
-	} // End of inner function
-} // End of indexHandler
+	}
+}
+
+// redirectHTTPToHTTPS redirects HTTP to HTTPS
+func redirectHTTPToHTTPS(wg *sync.WaitGroup) {
+	defer wg.Done()
+	httpServer := &http.Server{
+		Addr: ":8080",
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "https://"+r.Host+r.RequestURI, http.StatusMovedPermanently)
+		}),
+	}
+	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("HTTP server error: %v", err)
+	}
+}
 
 func main() {
 	config := Config{
@@ -451,27 +473,45 @@ func main() {
 	}
 
 	// Initialize database
-	db, err := database.NewDBConn("database.db")
+	db, err := db.NewDBConn("database.db")
 	if err != nil {
 		log.Fatalf("Erro ao inicializar banco de dados: %v", err)
 	}
 	defer db.Close()
 
-	// Initialize session store
-	sessions := NewSessionStore()
+	// Cleanup expired sessions periodically
+	go func() {
+		for {
+			if err := db.CleanupExpiredSessions(); err != nil {
+				log.Printf("Erro ao limpar sessões expiradas: %v", err)
+			}
+			time.Sleep(1 * time.Hour)
+		}
+	}()
 
-	// Serve static files (e.g., favicon.ico)
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	// Configure router with secure headers
+	mux := http.NewServeMux()
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	mux.HandleFunc("/login", loginHandler(db))
+	mux.HandleFunc("/login/submit", loginSubmitHandler(db))
+	mux.HandleFunc("/logout", logoutHandler(db))
+	mux.HandleFunc("/", indexHandler(db))
+	mux.HandleFunc("/upload", uploadHandler(config, db))
 
-	// Configure endpoints
-	http.HandleFunc("/login", loginHandler(sessions))
-	http.HandleFunc("/login/submit", loginSubmitHandler(db, sessions))
-	http.HandleFunc("/logout", logoutHandler(sessions))
-	http.HandleFunc("/", indexHandler(sessions))
-	http.HandleFunc("/upload", uploadHandler(config, sessions))
+	// Wrap router with secure headers middleware
+	handler := secureHeadersMiddleware(mux)
 
-	log.Println("Servidor rodando na porta 8080...")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
-		log.Fatalf("Erro ao iniciar o servidor: %v", err)
+	// Start HTTPS server
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go redirectHTTPToHTTPS(&wg)
+
+	server := &http.Server{
+		Addr:    ":8443",
+		Handler: handler,
 	}
-} // End of main
+	log.Println("Servidor HTTPS rodando na porta 443...")
+	if err := server.ListenAndServeTLS("certs/server.crt", "certs/server.key"); err != nil {
+		log.Fatalf("Erro ao iniciar servidor HTTPS: %v", err)
+	}
+}
