@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
 	"encoding/pem"
@@ -10,7 +11,13 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"time"
+
+	// Import your database package
+	database "github.com/waldirborbajr/nfe/database" // Adjust the import path as needed
 )
 
 // Config contém as configurações do sistema
@@ -31,6 +38,78 @@ type NFeResponse struct {
 type TemplateData struct {
 	Title string
 	JS    template.JS // Para o código JavaScript
+	CSRF  string      // CSRF token for login form
+}
+
+// Session stores user session data
+type Session struct {
+	UserID    int
+	ExpiresAt time.Time
+}
+
+// SessionStore manages in-memory sessions
+type SessionStore struct {
+	sessions map[string]Session
+	mu       sync.RWMutex
+}
+
+// NewSessionStore initializes a new session store
+func NewSessionStore() *SessionStore {
+	return &SessionStore{
+		sessions: make(map[string]Session),
+	}
+}
+
+// CreateSession creates a new session
+func (s *SessionStore) CreateSession(userID int) (string, error) {
+	sessionID := generateSessionID()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions[sessionID] = Session{
+		UserID:    userID,
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	}
+	return sessionID, nil
+}
+
+// GetSession retrieves a session by ID
+func (s *SessionStore) GetSession(sessionID string) (Session, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session, exists := s.sessions[sessionID]
+	if !exists || session.ExpiresAt.Before(time.Now()) {
+		return Session{}, false
+	}
+	return session, true
+}
+
+// DeleteSession removes a session
+func (s *SessionStore) DeleteSession(sessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, sessionID)
+}
+
+// generateSessionID creates a random session ID
+func generateSessionID() string {
+	b := make([]byte, 32)
+	_, err := rand.Read(b)
+	if err != nil {
+		log.Printf("Erro ao gerar session ID: %v", err)
+		return ""
+	}
+	return fmt.Sprintf("%x", b)
+}
+
+// generateCSRFToken creates a simple CSRF token
+func generateCSRFToken() string {
+	b := make([]byte, 16)
+	_, err := rand.Read(b)
+	if err != nil {
+		log.Printf("Erro ao gerar CSRF token: %v", err)
+		return ""
+	}
+	return fmt.Sprintf("%x", b)
 }
 
 // loadCertificate carrega o certificado digital A1 do arquivo .pfx
@@ -115,17 +194,29 @@ func consultNFe(client *http.Client, sefazURL, chaveNFe string) (NFeResponse, er
 	}
 
 	return nfe, nil
-}
+} // End of consultNFe
 
-// uploadHandler lida com o upload do certificado e consulta de NF-e
-func uploadHandler(config Config) http.HandlerFunc {
+// uploadHandler handles certificate upload and NF-e consultation
+func uploadHandler(config Config, sessions *SessionStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
+		// Check authentication
+		sessionID, err := r.Cookie("session_id")
+		if err != nil || sessionID == nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_, authenticated := sessions.GetSession(sessionID.Value)
+		if !authenticated {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		err := r.ParseMultipartForm(10 << 20) // 10 MB
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		err = r.ParseMultipartForm(10 << 20) // 10 MB
 		if err != nil {
 			http.Error(w, "Erro ao parsear formulário", http.StatusBadRequest)
 			return
@@ -178,18 +269,153 @@ func uploadHandler(config Config) http.HandlerFunc {
 			http.Error(w, "Erro ao codificar resposta JSON", http.StatusInternalServerError)
 			return
 		}
-	}
-}
+	} // End of inner function
+} // End of uploadHandler
 
-// indexHandler renderiza o template HTML
-func indexHandler() http.HandlerFunc {
+// loginHandler renders the login template
+func loginHandler(sessions *SessionStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		// Carrega o template do arquivo
+		// Check if already authenticated
+		sessionID, err := r.Cookie("session_id")
+		if err == nil {
+			if _, authenticated := sessions.GetSession(sessionID.Value); authenticated {
+				http.Redirect(w, r, "/", http.StatusSeeOther)
+				return
+			}
+		}
+
+		tmpl, err := template.ParseFiles("templates/login.html")
+		if err != nil {
+			log.Printf("Erro ao parsear template: %v", err)
+			http.Error(w, fmt.Sprintf("Erro ao parsear template: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		jsPath := filepath.Join("templates", "login.js")
+		jsContent, err := os.ReadFile(jsPath)
+		if err != nil {
+			log.Printf("Erro ao ler arquivo %s: %v", jsPath, err)
+			http.Error(w, fmt.Sprintf("Erro ao ler arquivo JavaScript: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		data := TemplateData{
+			Title: "Login",
+			JS:    template.JS(jsContent),
+			CSRF:  generateCSRFToken(),
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := tmpl.Execute(w, data); err != nil {
+			log.Printf("Erro ao renderizar template: %v", err)
+			http.Error(w, fmt.Sprintf("Erro ao renderizar template: %v", err), http.StatusInternalServerError)
+			return
+		}
+	} // End of inner function
+} // End of loginHandler
+
+// loginSubmitHandler processes login form submissions
+func loginSubmitHandler(db *database.DBConn, sessions *SessionStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		err := r.ParseForm()
+		if err != nil {
+			http.Error(w, "Erro ao parsear formulário", http.StatusBadRequest)
+			return
+		}
+
+		usuario := r.FormValue("usuario")
+		senha := r.FormValue("senha")
+		csrf := r.FormValue("csrf")
+
+		// Basic CSRF check (in production, use a more robust solution)
+		if csrf == "" {
+			http.Error(w, "CSRF token inválido", http.StatusBadRequest)
+			return
+		}
+
+		user, err := db.ValidateUser(usuario, senha)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Erro de login: %v", err), http.StatusUnauthorized)
+			return
+		}
+
+		// Create session
+		sessionID, err := sessions.CreateSession(user.ID)
+		if err != nil {
+			http.Error(w, "Erro ao criar sessão", http.StatusInternalServerError)
+			return
+		}
+
+		// Set session cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:     "session_id",
+			Value:    sessionID,
+			Path:     "/",
+			HttpOnly: true,
+			Expires:  time.Now().Add(24 * time.Hour),
+		})
+
+		// Redirect to main page
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	} // End of inner function
+} // End of loginSubmitHandler
+
+// logoutHandler clears the session
+func logoutHandler(sessions *SessionStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		sessionID, err := r.Cookie("session_id")
+		if err == nil {
+			sessions.DeleteSession(sessionID.Value)
+		}
+
+		// Clear cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:     "session_id",
+			Value:    "",
+			Path:     "/",
+			HttpOnly: true,
+			MaxAge:   -1,
+		})
+
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	} // End of inner function
+} // End of logoutHandler
+
+// indexHandler renders the main template
+func indexHandler(sessions *SessionStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Check authentication
+		sessionID, err := r.Cookie("session_id")
+		if err != nil || sessionID == nil {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		_, authenticated := sessions.GetSession(sessionID.Value)
+		if !authenticated {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+
 		tmpl, err := template.ParseFiles("templates/index.html")
 		if err != nil {
 			log.Printf("Erro ao parsear template: %v", err)
@@ -197,38 +423,52 @@ func indexHandler() http.HandlerFunc {
 			return
 		}
 
-		// Carrega o JavaScript do arquivo
-		jsContent, err := os.ReadFile("templates/app.js")
+		jsPath := filepath.Join("templates", "app.js")
+		jsContent, err := os.ReadFile(jsPath)
 		if err != nil {
-			log.Printf("Erro ao ler arquivo app.js: %v", err)
+			log.Printf("Erro ao ler arquivo %s: %v", jsPath, err)
 			http.Error(w, fmt.Sprintf("Erro ao ler arquivo JavaScript: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		// Dados para o template
 		data := TemplateData{
 			Title: "Consulta NF-e",
-			JS:    template.JS(jsContent), // Marca o JavaScript como seguro
+			JS:    template.JS(jsContent),
 		}
 
-		// Renderiza o template
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := tmpl.Execute(w, data); err != nil {
 			log.Printf("Erro ao renderizar template: %v", err)
 			http.Error(w, fmt.Sprintf("Erro ao renderizar template: %v", err), http.StatusInternalServerError)
 			return
 		}
-	}
-}
+	} // End of inner function
+} // End of indexHandler
 
 func main() {
 	config := Config{
 		SefazURL: "https://nfe.sefazrs.rs.gov.br/ws/NfeConsulta/NfeConsulta4.asmx",
 	}
 
-	// Configura os endpoints
-	http.HandleFunc("/", indexHandler())
-	http.HandleFunc("/upload", uploadHandler(config))
+	// Initialize database
+	db, err := database.NewDBConn("database.db")
+	if err != nil {
+		log.Fatalf("Erro ao inicializar banco de dados: %v", err)
+	}
+	defer db.Close()
+
+	// Initialize session store
+	sessions := NewSessionStore()
+
+	// Serve static files (e.g., favicon.ico)
+	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+
+	// Configure endpoints
+	http.HandleFunc("/login", loginHandler(sessions))
+	http.HandleFunc("/login/submit", loginSubmitHandler(db, sessions))
+	http.HandleFunc("/logout", logoutHandler(sessions))
+	http.HandleFunc("/", indexHandler(sessions))
+	http.HandleFunc("/upload", uploadHandler(config, sessions))
 
 	log.Println("Servidor rodando na porta 8080...")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
