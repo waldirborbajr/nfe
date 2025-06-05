@@ -2,181 +2,285 @@ package database
 
 import (
 	"database/sql"
-	"errors"
-	"fmt"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
 
-// DBConn represents a database connection
 type DBConn struct {
 	db *sql.DB
 }
 
-// User represents a user in the database
 type User struct {
 	ID       int
 	Username string
 	Password string
 }
 
-// Session represents a user session
 type Session struct {
 	ID        string
 	UserID    int
 	CSRFToken string
 	ExpiresAt time.Time
+	CreatedAt time.Time
 }
 
-// NewDBConn initializes a new SQLite database connection
+type NFeHeader struct {
+	ID          string
+	CUF         string
+	CNF         string
+	NatOp       string
+	IndPag      int
+	Mod         string
+	Serie       string
+	NNF         string
+	DEmi        string
+	DSaiEnt     string
+	TpNF        int
+	CMunFG      string
+	TpImp       int
+	TpEmis      int
+	CDV         int
+	TpAmb       int
+	FinNFe      int
+	ProcEmi     int
+	VerProc     string
+	EmitCNPJ    string
+	EmitXNome   string
+	EmitXLgr    string
+	EmitNro     string
+	EmitXBairro string
+	EmitCMun    string
+	EmitXMun    string
+	EmitUF      string
+	EmitCEP     string
+	DestCNPJ    string
+	DestXNome   string
+	DestXLgr    string
+	DestNro     string
+	DestXBairro string
+	DestCMun    string
+	DestXMun    string
+	DestUF      string
+	DestCEP     string
+	VBC         float64
+	VICMS       float64
+	VProd       float64
+	VPIS        float64
+	VCOFINS     float64
+	VNF         float64
+}
+
+type NFeItem struct {
+	NFeID   string
+	NItem   int
+	CProd   string
+	XProd   string
+	CFOP    string
+	UCom    string
+	QCom    float64
+	VUnCom  float64
+	VProd   float64
+	VBC     float64
+	PICMS   float64
+	VICMS   float64
+	PPIS    float64
+	VPIS    float64
+	PCOFINS float64
+	VCOFINS float64
+}
+
 func NewDBConn(dbPath string) (*DBConn, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %v", err)
+		return nil, err
 	}
 
-	// Create users table if it doesn't exist
-	createUsersTableSQL := `
-	CREATE TABLE IF NOT EXISTS users (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		username TEXT NOT NULL UNIQUE,
-		password TEXT NOT NULL
-	);
-	`
-	_, err = db.Exec(createUsersTableSQL)
+	// Create tables
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS users (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			username TEXT UNIQUE NOT NULL,
+			password TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS sessions (
+			id TEXT PRIMARY KEY,
+			user_id INTEGER,
+			csrf_token TEXT,
+			expires_at DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		);
+		CREATE TABLE IF NOT EXISTS nfe_headers (
+			id TEXT PRIMARY KEY,
+			cuf TEXT,
+			cnf TEXT,
+			nat_op TEXT,
+			ind_pag INTEGER,
+			mod TEXT,
+			serie TEXT,
+			nnf TEXT,
+			d_emi TEXT,
+			d_sai_ent TEXT,
+			tp_nf INTEGER,
+			c_mun_fg TEXT,
+			tp_imp INTEGER,
+			tp_emis INTEGER,
+			c_dv INTEGER,
+			tp_amb INTEGER,
+			fin_nfe INTEGER,
+			proc_emi INTEGER,
+			ver_proc TEXT,
+			emit_cnpj TEXT,
+			emit_x_nome TEXT,
+			emit_x_lgr TEXT,
+			emit_nro TEXT,
+			emit_x_bairro TEXT,
+			emit_c_mun TEXT,
+			emit_x_mun TEXT,
+			emit_uf TEXT,
+			emit_cep TEXT,
+			dest_cnpj TEXT,
+			dest_x_nome TEXT,
+			dest_x_lgr TEXT,
+			dest_nro TEXT,
+			dest_x_bairro TEXT,
+			dest_c_mun TEXT,
+			dest_x_mun TEXT,
+			dest_uf TEXT,
+			dest_cep TEXT,
+			v_bc REAL,
+			v_icms REAL,
+			v_prod REAL,
+			v_pis REAL,
+			v_cofins REAL,
+			v_nf REAL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE IF NOT EXISTS nfe_items (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			nfe_id TEXT,
+			n_item INTEGER,
+			c_prod TEXT,
+			x_prod TEXT,
+			cfop TEXT,
+			u_com TEXT,
+			q_com REAL,
+			v_un_com REAL,
+			v_prod REAL,
+			v_bc REAL,
+			p_icms REAL,
+			v_icms REAL,
+			p_pis REAL,
+			v_pis REAL,
+			p_cofins REAL,
+			v_cofins REAL,
+			FOREIGN KEY (nfe_id) REFERENCES nfe_headers(id)
+		);
+	`)
 	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to create users table: %v", err)
+		return nil, err
 	}
 
-	// Check if username column exists and add it if missing
-	var columnExists bool
-	err = db.QueryRow(`
-		SELECT EXISTS (
-			SELECT 1
-			FROM pragma_table_info('users')
-			WHERE name = 'username'
-		)
-	`).Scan(&columnExists)
+	// Insert default user if not exists
+	_, err = db.Exec(`
+		INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)
+	`, "admin", "admin123")
 	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to check username column: %v", err)
-	}
-	if !columnExists {
-		_, err = db.Exec("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''")
-		if err != nil {
-			db.Close()
-			return nil, fmt.Errorf("failed to add username column: %v", err)
-		}
-		// Ensure uniqueness constraint (SQLite doesn't support adding UNIQUE via ALTER, so recreate table if needed)
-		// For simplicity, we'll enforce uniqueness in application logic for existing users
-	}
-
-	// Create sessions table if it doesn't exist
-	createSessionsTableSQL := `
-	CREATE TABLE IF NOT EXISTS sessions (
-		id TEXT PRIMARY KEY,
-		user_id INTEGER NOT NULL,
-		csrf_token TEXT NOT NULL,
-		expires_at DATETIME NOT NULL,
-		FOREIGN KEY (user_id) REFERENCES users(id)
-	);
-	`
-	_, err = db.Exec(createSessionsTableSQL)
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to create sessions table: %v", err)
-	}
-
-	// Insert default admin user if not exists
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to hash password: %v", err)
-	}
-	_, err = db.Exec("INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)", "admin", string(hashedPassword))
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to insert default user: %v", err)
-	}
-
-	// Update empty usernames to 'admin' for default user (in case column was just added)
-	_, err = db.Exec("UPDATE users SET username = 'admin' WHERE username = '' AND password = ?", string(hashedPassword))
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to update default user username: %v", err)
+		return nil, err
 	}
 
 	return &DBConn{db: db}, nil
 }
 
-// Close closes the database connection
-func (c *DBConn) Close() error {
-	return c.db.Close()
+func (d *DBConn) Close() error {
+	return d.db.Close()
 }
 
-// ValidateUser validates user login credentials
-func (c *DBConn) ValidateUser(username, password string) (*User, error) {
+func (d *DBConn) ValidateUser(username, password string) (*User, error) {
 	var user User
-	err := c.db.QueryRow("SELECT id, username, password FROM users WHERE username = ?", username).Scan(&user.ID, &user.Username, &user.Password)
+	err := d.db.QueryRow(`
+		SELECT id, username, password FROM users WHERE username = ?
+	`, username).Scan(&user.ID, &user.Username, &user.Password)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("invalid username or password")
-		}
-		return nil, fmt.Errorf("failed to query user: %v", err)
+		return nil, err
 	}
-
-	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
-	if err != nil {
-		return nil, errors.New("invalid username or password")
+	if user.Password != password {
+		return nil, err
 	}
-
 	return &user, nil
 }
 
-// CreateSession creates a new session
-func (c *DBConn) CreateSession(userID int, sessionID, csrfToken string, expiresAt time.Time) error {
-	_, err := c.db.Exec("INSERT INTO sessions (id, user_id, csrf_token, expires_at) VALUES (?, ?, ?, ?)",
-		sessionID, userID, csrfToken, expiresAt)
-	if err != nil {
-		return fmt.Errorf("failed to create session: %v", err)
-	}
-	return nil
+func (d *DBConn) CreateSession(userID int, sessionID, csrfToken string, expiresAt time.Time) error {
+	_, err := d.db.Exec(`
+		INSERT INTO sessions (id, user_id, csrf_token, expires_at) VALUES (?, ?, ?, ?)
+	`, sessionID, userID, csrfToken, expiresAt)
+	return err
 }
 
-// GetSession retrieves a session by ID
-func (c *DBConn) GetSession(sessionID string) (*Session, error) {
+func (d *DBConn) GetSession(sessionID string) (*Session, error) {
 	var session Session
-	err := c.db.QueryRow("SELECT id, user_id, csrf_token, expires_at FROM sessions WHERE id = ?", sessionID).
-		Scan(&session.ID, &session.UserID, &session.CSRFToken, &session.ExpiresAt)
+	err := d.db.QueryRow(`
+		SELECT id, user_id, csrf_token, expires_at, created_at FROM sessions WHERE id = ?
+	`, sessionID).Scan(&session.ID, &session.UserID, &session.CSRFToken, &session.ExpiresAt, &session.CreatedAt)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("session not found")
-		}
-		return nil, fmt.Errorf("failed to query session: %v", err)
-	}
-	if session.ExpiresAt.Before(time.Now()) {
-		return nil, errors.New("session expired")
+		return nil, err
 	}
 	return &session, nil
 }
 
-// DeleteSession removes a session
-func (c *DBConn) DeleteSession(sessionID string) error {
-	_, err := c.db.Exec("DELETE FROM sessions WHERE id = ?", sessionID)
-	if err != nil {
-		return fmt.Errorf("failed to delete session: %v", err)
-	}
-	return nil
+func (d *DBConn) DeleteSession(sessionID string) error {
+	_, err := d.db.Exec(`
+		DELETE FROM sessions WHERE id = ?
+	`, sessionID)
+	return err
 }
 
-// CleanupExpiredSessions removes expired sessions
-func (c *DBConn) CleanupExpiredSessions() error {
-	_, err := c.db.Exec("DELETE FROM sessions WHERE expires_at < ?", time.Now())
+func (d *DBConn) CleanupExpiredSessions() error {
+	_, err := d.db.Exec(`
+		DELETE FROM sessions WHERE expires_at < datetime('now')
+	`)
+	return err
+}
+
+func (d *DBConn) InsertNFeHeader(header *NFeHeader) error {
+	_, err := d.db.Exec(`
+		INSERT INTO nfe_headers (
+			id, cuf, cnf, nat_op, ind_pag, mod, serie, nnf, d_emi, d_sai_ent, tp_nf,
+			c_mun_fg, tp_imp, tp_emis, c_dv, tp_amb, fin_nfe, proc_emi, ver_proc,
+			emit_cnpj, emit_x_nome, emit_x_lgr, emit_nro, emit_x_bairro, emit_c_mun,
+			emit_x_mun, emit_uf, emit_cep, dest_cnpj, dest_x_nome, dest_x_lgr, dest_nro,
+			dest_x_bairro, dest_c_mun, dest_x_mun, dest_uf, dest_cep, v_bc, v_icms,
+			v_prod, v_pis, v_cofins, v_nf
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, header.ID, header.CUF, header.CNF, header.NatOp, header.IndPag, header.Mod, header.Serie,
+		header.NNF, header.DEmi, header.DSaiEnt, header.TpNF, header.CMunFG, header.TpImp,
+		header.TpEmis, header.CDV, header.TpAmb, header.FinNFe, header.ProcEmi, header.VerProc,
+		header.EmitCNPJ, header.EmitXNome, header.EmitXLgr, header.EmitNro, header.EmitXBairro,
+		header.EmitCMun, header.EmitXMun, header.EmitUF, header.EmitCEP, header.DestCNPJ,
+		header.DestXNome, header.DestXLgr, header.DestNro, header.DestXBairro, header.DestCMun,
+		header.DestXMun, header.DestUF, header.DestCEP, header.VBC, header.VICMS, header.VProd,
+		header.VPIS, header.VCOFINS, header.VNF)
+	return err
+}
+
+func (d *DBConn) InsertNFeItem(item *NFeItem) error {
+	_, err := d.db.Exec(`
+		INSERT INTO nfe_items (
+			nfe_id, n_item, c_prod, x_prod, cfop, u_com, q_com, v_un_com, v_prod,
+			v_bc, p_icms, v_icms, p_pis, v_pis, p_cofins, v_cofins
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, item.NFeID, item.NItem, item.CProd, item.XProd, item.CFOP, item.UCom, item.QCom,
+		item.VUnCom, item.VProd, item.VBC, item.PICMS, item.VICMS, item.PPIS, item.VPIS,
+		item.PCOFINS, item.VCOFINS)
+	return err
+}
+
+func (d *DBConn) NFeExists(id string) (bool, error) {
+	var count int
+	err := d.db.QueryRow(`SELECT COUNT(*) FROM nfe_headers WHERE id = ?`, id).Scan(&count)
 	if err != nil {
-		return fmt.Errorf("failed to cleanup expired sessions: %v", err)
+		return false, err
 	}
-	return nil
+	return count > 0, nil
 }

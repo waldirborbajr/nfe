@@ -5,33 +5,124 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}}</title>
     <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
 </head>
-<body class="bg-gray-100 flex flex-col items-center justify-center h-screen">
-    <div class="bg-white p-8 rounded shadow-md w-full max-w-lg">
-        <h1 class="text-2xl font-bold mb-6 text-center">{{.Title}}</h1>
-        <form id="uploadForm" enctype="multipart/form-data" class="space-y-4">
-            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-            <div>
-                <label class="block text-gray-700 text-sm font-bold mb-2" for="certificate">Certificado Digital</label>
-                <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" id="certificate" name="certificate" type="file" accept=".pfx,.p12">
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen">
+    <div class="w-full max-w-lg">
+        <h1 class="text-2xl font-bold mb-6 text-center text-gray-800">{{.Title}}</h1>
+        <div id="app" class="bg-white p-8 rounded shadow-md">
+            <nav class="mb-6 flex space-x-2">
+                <button @click="viewMode = 'download'" :class="viewMode === 'download' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700'" class="px-4 py-2 rounded font-semibold">Baixar NF-e</button>
+                <button @click="viewMode = 'import'; fetchFiles()" :class="viewMode === 'import' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700'" class="px-4 py-2 rounded font-semibold">Importar NF-e</button>
+            </nav>
+            <div v-if="viewMode === 'download'">
+                <form id="uploadForm" enctype="multipart/form-data" class="space-y-4" @submit.prevent="submitDownload">
+                    <input type="hidden" name="csrf_token" :value="csrfToken">
+                    <div>
+                        <label class="block text-gray-700 text-sm font-semibold mb-2" for="certificate">Certificado Digital</label>
+                        <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" id="certificate" name="certificate" type="file" accept=".pfx,.p12">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 text-sm font-semibold mb-2" for="password">Senha do Certificado</label>
+                        <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" id="password" name="password" type="password" placeholder="Senha">
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">Consultar NF-e</button>
+                        <a href="/logout" class="text-blue-500 hover:text-blue-700 font-semibold">Sair</a>
+                    </div>
+                </form>
+                <div id="result" class="mt-6" v-if="nfeResults.length">
+                    <h2 class="text-xl font-bold mb-4">Resultados</h2>
+                    <ul class="space-y-2">
+                        <li v-for="nfe in nfeResults" :key="nfe.chaveNFe" class="p-4 bg-gray-50 rounded shadow">
+                            <p><strong>Chave:</strong> {{ nfe.chaveNFe }}</p>
+                            <p><strong>Status:</strong> {{ nfe.status }}</p>
+                            <p><strong>Descrição:</strong> {{ nfe.descricao }}</p>
+                            <p><strong>Emitente:</strong> {{ nfe.emitente }}</p>
+                            <p><strong>Data Emissão:</strong> {{ nfe.dataEmissao }}</p>
+                        </li>
+                    </ul>
+                </div>
             </div>
-            <div>
-                <label class="block text-gray-700 text-sm font-bold mb-2" for="password">Senha do Certificado</label>
-                <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" id="password" name="password" type="password" placeholder="Senha">
+            <div v-if="viewMode === 'import'">
+                <div class="mb-4">
+                    <h2 class="text-xl font-bold mb-2">Arquivos XML Disponíveis</h2>
+                    <p v-if="files.length === 0" class="text-gray-600">Nenhum arquivo XML encontrado em ~/Downloads.</p>
+                    <ul v-else class="space-y-2">
+                        <li v-for="file in files" :key="file.name" class="p-4 bg-gray-50 rounded shadow flex justify-between items-center">
+                            <span>{{ file.name }}</span>
+                            <button @click="importFile(file.name)" class="bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-3 rounded text-sm">Importar</button>
+                        </li>
+                    </ul>
+                </div>
+                <div v-if="importResults.length" class="mt-4">
+                    <h2 class="text-xl font-bold mb-2">Resultados da Importação</h2>
+                    <ul class="space-y-2">
+                        <li v-for="result in importResults" :key="result" class="p-4 rounded" :class="result.includes('sucesso') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'">
+                            {{ result }}
+                        </li>
+                    </ul>
+                </div>
             </div>
-            <div class="flex items-center justify-between">
-                <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">Consultar NF-e</button>
-                <a href="/logout" class="text-blue-500 hover:text-blue-700">Sair</a>
-            </div>
-        </form>
-        <div id="result" class="mt-6 hidden">
-            <h2 class="text-xl font-bold mb-4">Resultados</h2>
-            <ul id="nfeList" class="space-y-2"></ul>
         </div>
     </div>
     <script>
-        {{.JS}}
+        const { createApp } = Vue;
+        createApp({
+            data() {
+                return {
+                    viewMode: 'download',
+                    csrfToken: '{{.CSRFToken}}',
+                    files: [],
+                    nfeResults: [],
+                    importResults: []
+                };
+            },
+            methods: {
+                async fetchFiles() {
+                    try {
+                        const response = await fetch('/import-nfe', {
+                            method: 'GET',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        if (!response.ok) throw new Error('Erro ao listar arquivos');
+                        this.files = await response.json();
+                    } catch (error) {
+                        this.importResults.push(`Erro ao carregar arquivos: ${error.message}`);
+                    }
+                },
+                async submitDownload(event) {
+                    const form = event.target;
+                    const formData = new FormData(form);
+                    try {
+                        const response = await fetch('/upload', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        if (!response.ok) throw new Error('Erro ao consultar NF-e');
+                        this.nfeResults = await response.json();
+                    } catch (error) {
+                        this.nfeResults = [{ chaveNFe: '', status: 'Erro', descricao: error.message, emitente: '', dataEmissao: '' }];
+                    }
+                },
+                async importFile(fileName) {
+                    try {
+                        const response = await fetch('/import-nfe', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ files: [fileName], csrf_token: this.csrfToken })
+                        });
+                        if (!response.ok) throw new Error('Erro ao importar arquivo');
+                        const result = await response.json();
+                        this.importResults.push(...result.results);
+                        await this.fetchFiles(); // Refresh file list
+                    } catch (error) {
+                        this.importResults.push(`Erro ao importar ${fileName}: ${error.message}`);
+                    }
+                }
+            }
+        }).mount('#app');
     </script>
 </body>
 </html>
