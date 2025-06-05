@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/waldirborbajr/nfe/database"
@@ -25,10 +26,18 @@ func SecureHeadersMiddleware(next http.Handler, config entity.Config) http.Handl
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if config.Production {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdn.tailwindcss.com; style-src 'self' https://cdn.tailwindcss.com; img-src 'self'; connect-src 'self'")
+		} else {
+			csp := "default-src 'self' 'unsafe-inline' 'unsafe-eval' " +
+				"https://cdn.tailwindcss.com " +
+				"https://unpkg.com " +
+				"https://cdn.jsdelivr.net " +
+				"https://cdnjs.cloudflare.com"
+
+			w.Header().Set("Content-Security-Policy", csp)
 		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdn.tailwindcss.com; style-src 'self' https://cdn.tailwindcss.com; img-src 'self'; connect-src 'self'")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
 		next.ServeHTTP(w, r)
@@ -56,7 +65,7 @@ func generateSessionID() string {
 	b := make([]byte, 32)
 	_, err := rand.Read(b)
 	if err != nil {
-		log.Fatalf("Erro ao gerar session ID: %v", err)
+		log.Fatal("Erro ao gerar session ID: ", err)
 	}
 	return fmt.Sprintf("%x", b)
 }
@@ -66,7 +75,7 @@ func generateCSRFToken() string {
 	b := make([]byte, 32)
 	_, err := rand.Read(b)
 	if err != nil {
-		log.Fatalf("Erro ao gerar CSRF token: %v", err)
+		log.Fatal("Erro ao gerar CSRF token: ", err)
 	}
 	return fmt.Sprintf("%x", b)
 }
@@ -294,7 +303,7 @@ func LoginHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
 }
 
 // LoginSubmitHandler processes login form submissions
-func LoginSubmitHandler(db *database.DBConn) http.HandlerFunc {
+func LoginSubmitHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -348,7 +357,7 @@ func LoginSubmitHandler(db *database.DBConn) http.HandlerFunc {
 			Value:    sessionID,
 			Path:     "/",
 			HttpOnly: true,
-			Secure:   true,
+			Secure:   config.Production,
 			SameSite: http.SameSiteStrictMode,
 			Expires:  expiresAt,
 		})
@@ -358,7 +367,7 @@ func LoginSubmitHandler(db *database.DBConn) http.HandlerFunc {
 }
 
 // LogoutHandler clears the session
-func LogoutHandler(db *database.DBConn) http.HandlerFunc {
+func LogoutHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -367,8 +376,11 @@ func LogoutHandler(db *database.DBConn) http.HandlerFunc {
 
 		sessionID, err := r.Cookie("session_id")
 		if err == nil {
-			db.DeleteSession(sessionID.Value)
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
 		}
+
+		db.DeleteSession(sessionID.Value)
 
 		// Clear cookie
 		http.SetCookie(w, &http.Cookie{
@@ -376,7 +388,7 @@ func LogoutHandler(db *database.DBConn) http.HandlerFunc {
 			Value:    "",
 			Path:     "/",
 			HttpOnly: true,
-			Secure:   true,
+			Secure:   config.Production,
 			SameSite: http.SameSiteStrictMode,
 			MaxAge:   -1,
 		})
@@ -431,5 +443,19 @@ func IndexHandler(db *database.DBConn) http.HandlerFunc {
 			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 			return
 		}
+	}
+}
+
+// RedirectHTTPToHTTPS redirects HTTP to HTTPS
+func RedirectHTTPToHTTPS(wg *sync.WaitGroup) {
+	defer wg.Done()
+	httpServer := &http.Server{
+		Addr: ":8080",
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "https://"+r.Host+":4043"+r.RequestURI, http.StatusMovedPermanently)
+		}),
+	}
+	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatal("HTTP server error: ", err)
 	}
 }

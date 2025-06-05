@@ -57,8 +57,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	mux.HandleFunc("/login", handler.LoginHandler(db, config))
-	mux.HandleFunc("/login/submit", handler.LoginSubmitHandler(db))
-	mux.HandleFunc("/logout", handler.LogoutHandler(db))
+	mux.HandleFunc("/login/submit", handler.LoginSubmitHandler(db, config))
+	mux.HandleFunc("/logout", handler.LogoutHandler(db, config))
 	mux.HandleFunc("/", handler.IndexHandler(db))
 	mux.HandleFunc("/upload", handler.UploadHandler(config, db))
 
@@ -69,12 +69,13 @@ func main() {
 	if config.Production {
 		var wg sync.WaitGroup
 		wg.Add(1)
+		go handler.RedirectHTTPToHTTPS(&wg)
 
 		server := &http.Server{
-			Addr:    ":8043",
+			Addr:    ":4043",
 			Handler: securedHandler,
 		}
-		log.Println("Servidor HTTPS rodando na porta 8043...")
+		log.Println("Servidor HTTPS rodando na porta 4043...")
 		if err := server.ListenAndServeTLS("certs/server.crt", "certs/server.key"); err != nil {
 			log.Fatal("Erro ao iniciar servidor HTTPS: ", err)
 		}

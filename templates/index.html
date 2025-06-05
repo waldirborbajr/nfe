@@ -1,16 +1,37 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{.Title}}</title>
-  <script src="https://cdn.jsdelivr.net/npm/vue@3.4.27/dist/vue.global.js"></script>
-  <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
 </head>
-<body>
-  <div id="app"></div>
-  <script type="text/javascript">
-    {{.JS}}
-  </script>
+<body class="bg-gray-100 flex flex-col items-center justify-center h-screen">
+    <div class="bg-white p-8 rounded shadow-md w-full max-w-lg">
+        <h1 class="text-2xl font-bold mb-6 text-center">{{.Title}}</h1>
+        <form id="uploadForm" enctype="multipart/form-data" class="space-y-4">
+            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+            <div>
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="certificate">Certificado Digital</label>
+                <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" id="certificate" name="certificate" type="file" accept=".pfx,.p12">
+            </div>
+            <div>
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="password">Senha do Certificado</label>
+                <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" id="password" name="password" type="password" placeholder="Senha">
+            </div>
+            <div class="flex items-center justify-between">
+                <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">Consultar NF-e</button>
+                <a href="/logout" class="text-blue-500 hover:text-blue-700">Sair</a>
+            </div>
+        </form>
+        <div id="result" class="mt-6 hidden">
+            <h2 class="text-xl font-bold mb-4">Resultados</h2>
+            <ul id="nfeList" class="space-y-2"></ul>
+        </div>
+    </div>
+    <script>
+        {{.JS}}
+    </script>
 </body>
 </html>
