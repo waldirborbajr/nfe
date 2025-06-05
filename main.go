@@ -6,9 +6,11 @@ import (
 	"encoding/pem"
 	"fmt"
 	"html/template"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -95,7 +97,7 @@ func consultNFe(client *http.Client, sefazURL, chaveNFe string) (NFeResponse, er
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return NFeResponse{}, fmt.Errorf("erro ao ler resposta: %v", err)
 	}
@@ -126,7 +128,7 @@ func uploadHandler(config Config) http.HandlerFunc {
 
 		err := r.ParseMultipartForm(10 << 20) // 10 MB
 		if err != nil {
-			http.Error(w, "Erro ao parsear formulario", http.StatusBadRequest)
+			http.Error(w, "Erro ao parsear formulário", http.StatusBadRequest)
 			return
 		}
 
@@ -137,7 +139,7 @@ func uploadHandler(config Config) http.HandlerFunc {
 		}
 		defer file.Close()
 
-		certData, err := ioutil.ReadAll(file)
+		certData, err := io.ReadAll(file)
 		if err != nil {
 			http.Error(w, "Erro ao ler certificado", http.StatusBadRequest)
 			return
@@ -197,9 +199,10 @@ func indexHandler() http.HandlerFunc {
 		}
 
 		// Carrega o JavaScript do arquivo
-		jsContent, err := ioutil.ReadFile("templates/app.js")
+		jsPath := filepath.Join("templates", "app.js")
+		jsContent, err := os.ReadFile(jsPath)
 		if err != nil {
-			log.Printf("Erro ao ler arquivo app.js: %v", err)
+			log.Printf("Erro ao ler arquivo %s: %v", jsPath, err)
 			http.Error(w, fmt.Sprintf("Erro ao ler arquivo JavaScript: %v", err), http.StatusInternalServerError)
 			return
 		}
