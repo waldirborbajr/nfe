@@ -4,7 +4,8 @@ import "html/template"
 
 // Config contém as configurações do sistema
 type Config struct {
-	SefazURL string // URL do webservice da SEFAZ
+	SefazURL   string // URL do webservice da SEFAZ
+	Production bool   // Indica se o ambiente é de produção
 }
 
 // NFeResponse representa a resposta da API com informações da NF-e

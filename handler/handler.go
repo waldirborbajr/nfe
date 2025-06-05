@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/waldirborbajr/nfe/database"
@@ -22,9 +21,11 @@ import (
 )
 
 // SecureHeadersMiddleware adiciona cabeçalhos de segurança
-func SecureHeadersMiddleware(next http.Handler) http.Handler {
+func SecureHeadersMiddleware(next http.Handler, config entity.Config) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		if config.Production {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdn.tailwindcss.com; style-src 'self' https://cdn.tailwindcss.com; img-src 'self'; connect-src 'self'")
@@ -106,7 +107,7 @@ func consultNFe(client *http.Client, sefazURL, chaveNFe string) (entity.NFeRespo
 	}
 
 	soapRequest := `<?xml version="1.0" encoding="UTF-8"?>
-<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="https://www.w3.org/2003/05/soap-envelope">
+<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
   <soap12:Header>
     <nfeCabecMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeConsultaProtocolo4">
       <cUF>35</cUF>
@@ -129,7 +130,7 @@ func consultNFe(client *http.Client, sefazURL, chaveNFe string) (entity.NFeRespo
 		return entity.NFeResponse{}, fmt.Errorf("erro ao criar requisição: %v", err)
 	}
 
-	req.Header.Set("Content-Type", "application/xml; charset=utf-8")
+	req.Header.Set("Content-Type", "application/soap+xml; charset=utf-8")
 	req.Header.Set("SOAPAction", "http://www.portalfiscal.inf.br/nfe/wsdl/NFeConsultaProtocolo4/nfeConsultaNF")
 
 	resp, err := client.Do(req)
@@ -143,7 +144,7 @@ func consultNFe(client *http.Client, sefazURL, chaveNFe string) (entity.NFeRespo
 		return entity.NFeResponse{}, fmt.Errorf("erro ao ler resposta: %v", err)
 	}
 
-	// Simulate parsing (replace with actual XML parsing if needed)
+	// Simulação de parsing
 	nfe := entity.NFeResponse{
 		ChaveNFe:    chaveNFe,
 		Status:      "Autorizada",
@@ -243,7 +244,7 @@ func UploadHandler(config entity.Config, db *database.DBConn) http.HandlerFunc {
 }
 
 // LoginHandler renders the login template
-func LoginHandler(db *database.DBConn) http.HandlerFunc {
+func LoginHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -261,7 +262,7 @@ func LoginHandler(db *database.DBConn) http.HandlerFunc {
 
 		tmpl, err := template.ParseFiles("templates/login.html")
 		if err != nil {
-			log.Printf("Erro ao parsear formulário: %v", err)
+			log.Printf("Erro ao parsear template: %v", err)
 			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 			return
 		}
@@ -312,7 +313,7 @@ func LoginSubmitHandler(db *database.DBConn) http.HandlerFunc {
 			return
 		}
 
-		password, err := validateInput(r.FormValue("password"), "senha", 50)
+		password, err := validateInput(r.FormValue("password"), "password", 50)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -430,19 +431,5 @@ func IndexHandler(db *database.DBConn) http.HandlerFunc {
 			http.Error(w, "Erro interno do servidor", http.StatusInternalServerError)
 			return
 		}
-	}
-}
-
-// RedirectHTTPToHTTPS redirects HTTP to HTTPS
-func RedirectHTTPToHTTPS(wg *sync.WaitGroup) {
-	defer wg.Done()
-	httpServer := &http.Server{
-		Addr: ":8080",
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "https://"+r.Host+r.RequestURI, http.StatusMovedPermanently)
-		}),
-	}
-	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("HTTP server error: %v", err)
 	}
 }
