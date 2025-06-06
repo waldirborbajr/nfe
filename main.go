@@ -85,8 +85,11 @@ func main() {
 		log.Fatalf("Erro ao iniciar servidor HTTPS: %v", server.ListenAndServeTLS(certPath, keyPath))
 	} else {
 		server := &http.Server{
-			Addr:    ":8080",
-			Handler: securedHandler,
+			Addr:           ":8080",
+			ReadTimeout:    60 * time.Second,
+			WriteTimeout:   60 * time.Second,
+			MaxHeaderBytes: 1 << 16,
+			Handler:        securedHandler,
 		}
 		log.Println("Servidor HTTP rodando na porta 8080 (modo desenvolvimento)...")
 		log.Fatalf("Erro ao iniciar servidor HTTP: %v", server.ListenAndServe())
