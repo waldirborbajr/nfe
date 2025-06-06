@@ -22,12 +22,22 @@ import (
 	"github.com/waldirborbajr/nfe/entity"
 )
 
-// SecureHeadersMiddleware adds security headers
+// SecureHeadersMiddleware is a middleware that sets various HTTP security headers on the response.
+// In production mode, it enforces strict transport security and a restrictive Content Security Policy (CSP).
+// In non-production mode, it sets a more permissive CSP to facilitate development.
+// The middleware also sets headers to prevent MIME sniffing, clickjacking, and cross-site scripting (XSS) attacks.
+// It takes the next http.Handler to call and a configuration struct to determine the environment.
 func SecureHeadersMiddleware(next http.Handler, config entity.Config) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if config.Production {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-			w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://unpkg.com; style-src 'self' https://cdn.tailwindcss.com; img-src 'self'; connect-src 'self'")
+			csp := "default-src 'self'; script-src 'self' " +
+				"https://cdn.jsdelivr.net " +
+				"https://cdn.tailwindcss.com " +
+				"https://unpkg.com; style-src 'self' " +
+				"https://cdn.tailwindcss.com; img-src 'self' " +
+				"connect-src 'self'"
+			w.Header().Set("Content-Security-Policy", csp)
 		} else {
 			csp := "default-src 'self' 'unsafe-inline' 'unsafe-eval' " +
 				"https://cdn.tailwindcss.com " +
@@ -260,6 +270,19 @@ func UploadHandler(config entity.Config, db *database.DBConn) http.HandlerFunc {
 }
 
 // LoginHandler renders the login template
+// LoginHandler returns an HTTP handler function for the login page.
+// It checks if the database connection is available and only allows GET requests.
+// If a valid session is found in the request cookies, it redirects the user to the home page.
+// Otherwise, it renders the login template with a generated CSRF token.
+// In case of errors (e.g., missing database connection, template parsing/rendering issues),
+// it logs the error and responds with an appropriate HTTP error status.
+//
+// Parameters:
+//   - db:    Pointer to the database connection.
+//   - config: Application configuration.
+//
+// Returns:
+//   - http.HandlerFunc: The handler function for the login endpoint.
 func LoginHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
