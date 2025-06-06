@@ -12,9 +12,8 @@ import (
 	"time"
 
 	"github.com/waldirborbajr/nfe/entity"
-	"github.com/waldirborbajr/nfe/handler"
-	"github.com/waldirborbajr/nfe/middleware"
 	"github.com/waldirborbajr/nfe/repository"
+	"github.com/waldirborbajr/nfe/routes"
 	"gopkg.in/yaml.v3"
 )
 
@@ -100,26 +99,16 @@ func main() {
 		}
 	}()
 
-	// Configure router
-	mux := http.NewServeMux()
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
-	mux.HandleFunc("/login", handler.LoginHandler(db.(*repository.SQLiteDBRepository), config))
-	mux.HandleFunc("/login/submit", handler.LoginSubmitHandler(db.(*repository.SQLiteDBRepository), config))
-	mux.HandleFunc("/logout", handler.LogoutHandler(db.(*repository.SQLiteDBRepository), config))
-	mux.HandleFunc("/", handler.IndexHandler(db.(*repository.SQLiteDBRepository)))
-	mux.HandleFunc("/upload", handler.UploadHandler(config, db.(*repository.SQLiteDBRepository)))
-	mux.HandleFunc("/import", handler.ImportNFeHandler(db.(*repository.SQLiteDBRepository)))
-
-	// Apply secure headers middleware
-	securedHandler := middleware.SecureHeadersMiddleware(mux, config)
+	// Use routes package to get the mux/router with security middleware applied
+	handlerWithSecurity := routes.NewRouter(db, config)
 
 	if config.Production {
 		certPath := filepath.Join("certs", "server.crt")
 		keyPath := filepath.Join("certs", "server.key")
-		server := createHTTPServer(":4043", securedHandler)
+		server := createHTTPServer(":4043", handlerWithSecurity)
 		runServer(server, true, certPath, keyPath)
 	} else {
-		server := createHTTPServer(":8080", securedHandler)
+		server := createHTTPServer(":8080", handlerWithSecurity)
 		runServer(server, false, "", "")
 	}
 }
