@@ -6,8 +6,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
-	"sync"
+	"syscall"
 	"time"
 
 	"github.com/waldirborbajr/nfe/entity"
@@ -30,6 +31,47 @@ func loadConfig() (entity.Config, error) {
 	}
 
 	return config, nil
+}
+
+func createHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1 MB
+		ErrorLog:          log.New(os.Stderr, "http: ", log.LstdFlags),
+	}
+}
+
+func runServer(server *http.Server, useTLS bool, certPath, keyPath string) {
+	// Start server in goroutine
+	go func() {
+		log.Printf("Servidor rodando na porta %s...", server.Addr)
+		var err error
+		if useTLS {
+			err = server.ListenAndServeTLS(certPath, keyPath)
+		} else {
+			err = server.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Erro ao iniciar servidor: %v", err)
+		}
+	}()
+
+	// Graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+	log.Println("Desligando servidor...")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+	log.Println("Servidor finalizado")
 }
 
 func main() {
@@ -71,28 +113,12 @@ func main() {
 	securedHandler := handler.SecureHeadersMiddleware(mux, config)
 
 	if config.Production {
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go handler.RedirectHTTPToHTTPS(&wg)
-
 		certPath := filepath.Join("certs", "server.crt")
 		keyPath := filepath.Join("certs", "server.key")
-
-		server := &http.Server{
-			Addr:    ":4043",
-			Handler: securedHandler,
-		}
-		log.Println("Servidor HTTPS rodando na porta 4043...")
-		log.Fatalf("Erro ao iniciar servidor HTTPS: %v", server.ListenAndServeTLS(certPath, keyPath))
+		server := createHTTPServer(":4043", securedHandler)
+		runServer(server, true, certPath, keyPath)
 	} else {
-		server := &http.Server{
-			Addr:           ":8080",
-			ReadTimeout:    60 * time.Second,
-			WriteTimeout:   60 * time.Second,
-			MaxHeaderBytes: 1 << 16,
-			Handler:        securedHandler,
-		}
-		log.Println("Servidor HTTP rodando na porta 8080 (modo desenvolvimento)...")
-		log.Fatalf("Erro ao iniciar servidor HTTP: %v", server.ListenAndServe())
+		server := createHTTPServer(":8080", securedHandler)
+		runServer(server, false, "", "")
 	}
 }
