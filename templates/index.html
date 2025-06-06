@@ -97,7 +97,7 @@
         methods: {
             async fetchFiles() {
                 try {
-                    const response = await fetch('/import-nfe', {
+                    const response = await fetch('/import', {
                         method: 'GET',
                         headers: { 'Content-Type': 'application/json' }
                     });
@@ -123,7 +123,7 @@
             },
             async importFile(fileName) {
                 try {
-                    const response = await fetch('/import-nfe', {
+                    const response = await fetch('/import', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ files: [fileName], csrf_token: this.csrfToken })
