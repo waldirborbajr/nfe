@@ -19,7 +19,6 @@ import (
 	"github.com/waldirborbajr/nfe/response"
 )
 
-
 // validateInput sanitizes and validates input
 func validateInput(input string, field string, maxLength int) (string, error) {
 	input = strings.TrimSpace(input)
