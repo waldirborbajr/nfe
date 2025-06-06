@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -11,27 +10,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/waldirborbajr/nfe/entity"
+	"github.com/waldirborbajr/nfe/config"
 	"github.com/waldirborbajr/nfe/repository"
 	"github.com/waldirborbajr/nfe/routes"
-	"gopkg.in/yaml.v3"
 )
 
 const sessionCleanupInterval = time.Hour
-
-func loadConfig() (entity.Config, error) {
-	data, err := os.ReadFile("config.yaml")
-	if err != nil {
-		return entity.Config{}, fmt.Errorf("erro ao ler config.yaml: %w", err)
-	}
-
-	var config entity.Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return entity.Config{}, fmt.Errorf("erro ao parsear config.yaml: %w", err)
-	}
-
-	return config, nil
-}
 
 func createHTTPServer(addr string, handler http.Handler) *http.Server {
 	return &http.Server{
@@ -76,7 +60,7 @@ func runServer(server *http.Server, useTLS bool, certPath, keyPath string) {
 
 func main() {
 	// Load configuration
-	config, err := loadConfig()
+	config, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("Erro ao carregar configuração: %v", err)
 	}
