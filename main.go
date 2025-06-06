@@ -65,6 +65,7 @@ func main() {
 	mux.HandleFunc("/logout", handler.LogoutHandler(db.(*repository.DBConnSQLite), config))
 	mux.HandleFunc("/", handler.IndexHandler(db.(*repository.DBConnSQLite)))
 	mux.HandleFunc("/upload", handler.UploadHandler(config, db.(*repository.DBConnSQLite)))
+	mux.HandleFunc("/import", handler.ImportNFeHandler(db.(*repository.DBConnSQLite)))
 
 	// Apply secure headers middleware
 	securedHandler := handler.SecureHeadersMiddleware(mux, config)
