@@ -18,10 +18,17 @@ type DB interface {
 	Close() error
 	CleanupExpiredSessions(ctx context.Context) error
 	// Add other methods as needed
+	ValidateUser(username, password string) (*entity.User, error)
+	CreateSession(userID int, sessionID, csrfToken string, expiresAt time.Time) error
+	GetSession(sessionID string) (*entity.Session, error)
+	DeleteSession(sessionID string) error
+	InsertNFeHeader(header *entity.NFeHeader) error
+	InsertNFeItem(item *entity.NFeItem) error
+	NFeExists(id string) (bool, error)
 }
 
-// DBConnSQLite implements the DB interface for SQLite.
-type DBConnSQLite struct {
+// SQLiteDBRepository implements the DB interface for SQLite.
+type SQLiteDBRepository struct {
 	db *sql.DB
 }
 
@@ -67,16 +74,16 @@ func NewDBConnSQLite(path string) (DB, error) {
 	// Create tables
 	db.Exec(string(scheme))
 
-	return &DBConnSQLite{db: db}, nil
+	return &SQLiteDBRepository{db: db}, nil
 }
 
 // Close closes the database connection.
-func (d *DBConnSQLite) Close() error {
+func (d *SQLiteDBRepository) Close() error {
 	return d.db.Close()
 }
 
 // CleanupExpiredSessions securely deletes expired sessions.
-func (d *DBConnSQLite) CleanupExpiredSessions(ctx context.Context) error {
+func (d *SQLiteDBRepository) CleanupExpiredSessions(ctx context.Context) error {
 	stmt, err := d.db.PrepareContext(ctx, "DELETE FROM sessions WHERE expires_at < ?")
 	if err != nil {
 		return fmt.Errorf("prepare failed: %w", err)
@@ -90,7 +97,7 @@ func (d *DBConnSQLite) CleanupExpiredSessions(ctx context.Context) error {
 	return nil
 }
 
-func (d *DBConnSQLite) ValidateUser(username, password string) (*entity.User, error) {
+func (d *SQLiteDBRepository) ValidateUser(username, password string) (*entity.User, error) {
 	var user entity.User
 	err := d.db.QueryRow(`
 		SELECT id, username, password FROM users WHERE username = ?
@@ -104,14 +111,14 @@ func (d *DBConnSQLite) ValidateUser(username, password string) (*entity.User, er
 	return &user, nil
 }
 
-func (d *DBConnSQLite) CreateSession(userID int, sessionID, csrfToken string, expiresAt time.Time) error {
+func (d *SQLiteDBRepository) CreateSession(userID int, sessionID, csrfToken string, expiresAt time.Time) error {
 	_, err := d.db.Exec(`
 		INSERT INTO sessions (id, user_id, csrf_token, expires_at) VALUES (?, ?, ?, ?)
 	`, sessionID, userID, csrfToken, expiresAt)
 	return err
 }
 
-func (d *DBConnSQLite) GetSession(sessionID string) (*entity.Session, error) {
+func (d *SQLiteDBRepository) GetSession(sessionID string) (*entity.Session, error) {
 	var session entity.Session
 	err := d.db.QueryRow(`
 		SELECT id, user_id, csrf_token, expires_at, created_at FROM sessions WHERE id = ?
@@ -122,14 +129,14 @@ func (d *DBConnSQLite) GetSession(sessionID string) (*entity.Session, error) {
 	return &session, nil
 }
 
-func (d *DBConnSQLite) DeleteSession(sessionID string) error {
+func (d *SQLiteDBRepository) DeleteSession(sessionID string) error {
 	_, err := d.db.Exec(`
 		DELETE FROM sessions WHERE id = ?
 	`, sessionID)
 	return err
 }
 
-func (d *DBConnSQLite) InsertNFeHeader(header *entity.NFeHeader) error {
+func (d *SQLiteDBRepository) InsertNFeHeader(header *entity.NFeHeader) error {
 	_, err := d.db.Exec(`
 		INSERT INTO nfe_headers (
 			id, cuf, cnf, nat_op, ind_pag, mod, serie, nnf, d_emi, d_sai_ent, tp_nf,
@@ -150,7 +157,7 @@ func (d *DBConnSQLite) InsertNFeHeader(header *entity.NFeHeader) error {
 	return err
 }
 
-func (d *DBConnSQLite) InsertNFeItem(item *entity.NFeItem) error {
+func (d *SQLiteDBRepository) InsertNFeItem(item *entity.NFeItem) error {
 	_, err := d.db.Exec(`
 		INSERT INTO nfe_items (
 			nfe_id, n_item, c_prod, x_prod, cfop, u_com, q_com, v_un_com, v_prod,
@@ -162,7 +169,7 @@ func (d *DBConnSQLite) InsertNFeItem(item *entity.NFeItem) error {
 	return err
 }
 
-func (d *DBConnSQLite) NFeExists(id string) (bool, error) {
+func (d *SQLiteDBRepository) NFeExists(id string) (bool, error) {
 	var count int
 	err := d.db.QueryRow(`SELECT COUNT(*) FROM nfe_headers WHERE id = ?`, id).Scan(&count)
 	if err != nil {

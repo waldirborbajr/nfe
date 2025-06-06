@@ -16,7 +16,7 @@ import (
 )
 
 // ImportNFeHandler handles XML file listing and importing
-func ImportNFeHandler(db *repository.DBConnSQLite) http.HandlerFunc {
+func ImportNFeHandler(db *repository.SQLiteDBRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("ImportNFeHandler: Database connection is nil")
@@ -38,7 +38,7 @@ func ImportNFeHandler(db *repository.DBConnSQLite) http.HandlerFunc {
 			return
 		}
 
-		downloadsDir := filepath.Join(os.Getenv("HOME"), "Downloads")
+		downloadsDir := filepath.Join(os.Getenv("HOME"), "nferepo")
 		doneDir := filepath.Join(downloadsDir, "done")
 
 		// Create done directory

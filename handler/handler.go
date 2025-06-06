@@ -168,7 +168,7 @@ func consultNFe(client *http.Client, sefazURL, chaveNFe string) (entity.NFeRespo
 }
 
 // UploadHandler handles certificate upload and NF-e consultation
-func UploadHandler(config entity.Config, db *repository.DBConnSQLite) http.HandlerFunc {
+func UploadHandler(config entity.Config, db *repository.SQLiteDBRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("UploadHandler: Database connection is nil")
@@ -279,7 +279,7 @@ func UploadHandler(config entity.Config, db *repository.DBConnSQLite) http.Handl
 //
 // Returns:
 //   - http.HandlerFunc: The handler function for the login endpoint.
-func LoginHandler(db *repository.DBConnSQLite, config entity.Config) http.HandlerFunc {
+func LoginHandler(db *repository.SQLiteDBRepository, config entity.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("LoginHandler: Database connection is nil")
@@ -326,7 +326,7 @@ func LoginHandler(db *repository.DBConnSQLite, config entity.Config) http.Handle
 }
 
 // LoginSubmitHandler processes login form submissions
-func LoginSubmitHandler(db *repository.DBConnSQLite, config entity.Config) http.HandlerFunc {
+func LoginSubmitHandler(db *repository.SQLiteDBRepository, config entity.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("LoginSubmitHandler: Database connection is nil")
@@ -401,7 +401,7 @@ func LoginSubmitHandler(db *repository.DBConnSQLite, config entity.Config) http.
 }
 
 // LogoutHandler clears the session
-func LogoutHandler(db *repository.DBConnSQLite, config entity.Config) http.HandlerFunc {
+func LogoutHandler(db *repository.SQLiteDBRepository, config entity.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("LogoutHandler: Database connection is nil")
@@ -435,7 +435,7 @@ func LogoutHandler(db *repository.DBConnSQLite, config entity.Config) http.Handl
 }
 
 // IndexHandler renders the main template
-func IndexHandler(db *repository.DBConnSQLite) http.HandlerFunc {
+func IndexHandler(db *repository.SQLiteDBRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("IndexHandler: Database connection is nil")
