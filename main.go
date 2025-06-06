@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -38,17 +39,18 @@ func main() {
 		log.Fatalf("Erro ao carregar configuração: %v", err)
 	}
 
-	// Initialize database
-	db, err := repository.NewDBConn("database.db")
+	// Initialize repository (now returns repository.DB interface)
+	db, err := repository.NewDBConnSQLite("database.db")
 	if err != nil {
 		log.Fatalf("Erro ao inicializar banco de dados: %v", err)
 	}
 	defer db.Close()
 
-	// Periodically clean up expired sessions
+	// Periodically clean up expired sessions using context
 	go func() {
+		ctx := context.Background()
 		for {
-			if err := db.CleanupExpiredSessions(); err != nil {
+			if err := db.CleanupExpiredSessions(ctx); err != nil {
 				log.Printf("Erro ao limpar sessões expiradas: %v", err)
 			}
 			time.Sleep(sessionCleanupInterval)
@@ -58,11 +60,11 @@ func main() {
 	// Configure router
 	mux := http.NewServeMux()
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
-	mux.HandleFunc("/login", handler.LoginHandler(db, config))
-	mux.HandleFunc("/login/submit", handler.LoginSubmitHandler(db, config))
-	mux.HandleFunc("/logout", handler.LogoutHandler(db, config))
-	mux.HandleFunc("/", handler.IndexHandler(db))
-	mux.HandleFunc("/upload", handler.UploadHandler(config, db))
+	mux.HandleFunc("/login", handler.LoginHandler(db.(*repository.DBConnSQLite), config))
+	mux.HandleFunc("/login/submit", handler.LoginSubmitHandler(db.(*repository.DBConnSQLite), config))
+	mux.HandleFunc("/logout", handler.LogoutHandler(db.(*repository.DBConnSQLite), config))
+	mux.HandleFunc("/", handler.IndexHandler(db.(*repository.DBConnSQLite)))
+	mux.HandleFunc("/upload", handler.UploadHandler(config, db.(*repository.DBConnSQLite)))
 
 	// Apply secure headers middleware
 	securedHandler := handler.SecureHeadersMiddleware(mux, config)

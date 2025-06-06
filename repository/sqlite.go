@@ -1,21 +1,55 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/waldirborbajr/nfe/entity"
 	_ "modernc.org/sqlite"
 )
 
+// DB abstracts database operations for testability.
+type DB interface {
+	Close() error
+	CleanupExpiredSessions(ctx context.Context) error
+	// Add other methods as needed
+}
+
+// DBConnSQLite implements the DB interface for SQLite.
 type DBConnSQLite struct {
 	db *sql.DB
 }
 
-func NewDBConn(dbPath string) (*DBConnSQLite, error) {
-	db, err := sql.Open("sqlite", dbPath)
+// NewDBConnSQLite creates a new SQLite connection with best practices.
+func NewDBConnSQLite(path string) (DB, error) {
+	// Ensure the DB file has restricted permissions (0600)
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create/open db file: %w", err)
+	}
+	file.Close()
+
+	// Open SQLite database with foreign keys enabled
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_foreign_keys=on", path))
+	if err != nil {
+		return nil, fmt.Errorf("failed to open db: %w", err)
+	}
+
+	// Set connection pool limits
+	db.SetMaxOpenConns(1)
+	db.SetConnMaxLifetime(time.Hour)
+
+	// Set secure pragmas
+	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA journal_mode = WAL;"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to set journal mode: %w", err)
 	}
 
 	// Create tables
@@ -115,8 +149,24 @@ func NewDBConn(dbPath string) (*DBConnSQLite, error) {
 	return &DBConnSQLite{db: db}, nil
 }
 
+// Close closes the database connection.
 func (d *DBConnSQLite) Close() error {
 	return d.db.Close()
+}
+
+// CleanupExpiredSessions securely deletes expired sessions.
+func (d *DBConnSQLite) CleanupExpiredSessions(ctx context.Context) error {
+	stmt, err := d.db.PrepareContext(ctx, "DELETE FROM sessions WHERE expires_at < ?")
+	if err != nil {
+		return fmt.Errorf("prepare failed: %w", err)
+	}
+	defer stmt.Close()
+
+	_, err = stmt.ExecContext(ctx, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("exec failed: %w", err)
+	}
+	return nil
 }
 
 func (d *DBConnSQLite) ValidateUser(username, password string) (*entity.User, error) {
@@ -155,13 +205,6 @@ func (d *DBConnSQLite) DeleteSession(sessionID string) error {
 	_, err := d.db.Exec(`
 		DELETE FROM sessions WHERE id = ?
 	`, sessionID)
-	return err
-}
-
-func (d *DBConnSQLite) CleanupExpiredSessions() error {
-	_, err := d.db.Exec(`
-		DELETE FROM sessions WHERE expires_at < datetime('now')
-	`)
 	return err
 }
 
