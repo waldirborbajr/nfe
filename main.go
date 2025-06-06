@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -14,16 +15,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const sessionCleanupInterval = time.Hour
+
 func loadConfig() (entity.Config, error) {
-	data, err := ioutil.ReadFile("config.yaml")
+	data, err := os.ReadFile("config.yaml")
 	if err != nil {
-		return entity.Config{}, fmt.Errorf("erro ao ler config.yaml: %v", err)
+		return entity.Config{}, fmt.Errorf("erro ao ler config.yaml: %w", err)
 	}
 
 	var config entity.Config
-	err = yaml.Unmarshal(data, &config)
-	if err != nil {
-		return entity.Config{}, fmt.Errorf("erro ao parsear config.yaml: %v", err)
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return entity.Config{}, fmt.Errorf("erro ao parsear config.yaml: %w", err)
 	}
 
 	return config, nil
@@ -33,23 +35,23 @@ func main() {
 	// Load configuration
 	config, err := loadConfig()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Erro ao carregar configuração: %v", err)
 	}
 
 	// Initialize database
 	db, err := database.NewDBConn("database.db")
 	if err != nil {
-		log.Fatal("Erro ao inicializar banco de dados: ", err)
+		log.Fatalf("Erro ao inicializar banco de dados: %v", err)
 	}
 	defer db.Close()
 
-	// Cleanup expired sessions periodically
+	// Periodically clean up expired sessions
 	go func() {
 		for {
 			if err := db.CleanupExpiredSessions(); err != nil {
 				log.Printf("Erro ao limpar sessões expiradas: %v", err)
 			}
-			time.Sleep(1 * time.Hour)
+			time.Sleep(sessionCleanupInterval)
 		}
 	}()
 
@@ -65,28 +67,26 @@ func main() {
 	// Apply secure headers middleware
 	securedHandler := handler.SecureHeadersMiddleware(mux, config)
 
-	// Start server based on production mode
 	if config.Production {
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go handler.RedirectHTTPToHTTPS(&wg)
+
+		certPath := filepath.Join("certs", "server.crt")
+		keyPath := filepath.Join("certs", "server.key")
 
 		server := &http.Server{
 			Addr:    ":4043",
 			Handler: securedHandler,
 		}
 		log.Println("Servidor HTTPS rodando na porta 4043...")
-		if err := server.ListenAndServeTLS("certs/server.crt", "certs/server.key"); err != nil {
-			log.Fatal("Erro ao iniciar servidor HTTPS: ", err)
-		}
+		log.Fatalf("Erro ao iniciar servidor HTTPS: %v", server.ListenAndServeTLS(certPath, keyPath))
 	} else {
 		server := &http.Server{
 			Addr:    ":8080",
 			Handler: securedHandler,
 		}
 		log.Println("Servidor HTTP rodando na porta 8080 (modo desenvolvimento)...")
-		if err := server.ListenAndServe(); err != nil {
-			log.Fatal("Erro ao iniciar servidor HTTP: ", err)
-		}
+		log.Fatalf("Erro ao iniciar servidor HTTP: %v", server.ListenAndServe())
 	}
 }
