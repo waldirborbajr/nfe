@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/waldirborbajr/nfe/database"
 	"github.com/waldirborbajr/nfe/entity"
 	"github.com/waldirborbajr/nfe/handler"
+	"github.com/waldirborbajr/nfe/repository"
 	"gopkg.in/yaml.v3"
 )
 
@@ -39,7 +39,7 @@ func main() {
 	}
 
 	// Initialize database
-	db, err := database.NewDBConn("database.db")
+	db, err := repository.NewDBConn("database.db")
 	if err != nil {
 		log.Fatalf("Erro ao inicializar banco de dados: %v", err)
 	}

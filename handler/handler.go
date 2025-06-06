@@ -18,8 +18,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/waldirborbajr/nfe/database"
 	"github.com/waldirborbajr/nfe/entity"
+	"github.com/waldirborbajr/nfe/repository"
 )
 
 // SecureHeadersMiddleware is a middleware that sets various HTTP security headers on the response.
@@ -172,7 +172,7 @@ func consultNFe(client *http.Client, sefazURL, chaveNFe string) (entity.NFeRespo
 }
 
 // UploadHandler handles certificate upload and NF-e consultation
-func UploadHandler(config entity.Config, db *database.DBConn) http.HandlerFunc {
+func UploadHandler(config entity.Config, db *repository.DBConnSQLite) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("UploadHandler: Database connection is nil")
@@ -283,7 +283,7 @@ func UploadHandler(config entity.Config, db *database.DBConn) http.HandlerFunc {
 //
 // Returns:
 //   - http.HandlerFunc: The handler function for the login endpoint.
-func LoginHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
+func LoginHandler(db *repository.DBConnSQLite, config entity.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("LoginHandler: Database connection is nil")
@@ -330,7 +330,7 @@ func LoginHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
 }
 
 // LoginSubmitHandler processes login form submissions
-func LoginSubmitHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
+func LoginSubmitHandler(db *repository.DBConnSQLite, config entity.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("LoginSubmitHandler: Database connection is nil")
@@ -405,7 +405,7 @@ func LoginSubmitHandler(db *database.DBConn, config entity.Config) http.HandlerF
 }
 
 // LogoutHandler clears the session
-func LogoutHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
+func LogoutHandler(db *repository.DBConnSQLite, config entity.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("LogoutHandler: Database connection is nil")
@@ -439,7 +439,7 @@ func LogoutHandler(db *database.DBConn, config entity.Config) http.HandlerFunc {
 }
 
 // IndexHandler renders the main template
-func IndexHandler(db *database.DBConn) http.HandlerFunc {
+func IndexHandler(db *repository.DBConnSQLite) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("IndexHandler: Database connection is nil")
@@ -492,7 +492,7 @@ func IndexHandler(db *database.DBConn) http.HandlerFunc {
 }
 
 // ImportNFeHandler handles XML file listing and importing
-func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
+func ImportNFeHandler(db *repository.DBConnSQLite) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("ImportNFeHandler: Database connection is nil")
@@ -610,7 +610,7 @@ func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
 				}
 
 				// Insert header
-				header := &database.NFeHeader{
+				header := &entity.NFeHeader{
 					ID:          nfe.InfNFe.ID,
 					CUF:         nfe.InfNFe.Ide.CUF,
 					CNF:         nfe.InfNFe.Ide.CNF,
@@ -670,7 +670,7 @@ func ImportNFeHandler(db *database.DBConn) http.HandlerFunc {
 						results = append(results, fmt.Sprintf("Erro ao processar item %s", fileName))
 						continue
 					}
-					item := &database.NFeItem{
+					item := &entity.NFeItem{
 						NFeID:   nfe.InfNFe.ID,
 						NItem:   nItem,
 						CProd:   det.Prod.CProd,

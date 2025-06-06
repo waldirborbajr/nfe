@@ -1,96 +1,18 @@
-package database
+package repository
 
 import (
 	"database/sql"
 	"time"
 
+	"github.com/waldirborbajr/nfe/entity"
 	_ "modernc.org/sqlite"
 )
 
-type DBConn struct {
+type DBConnSQLite struct {
 	db *sql.DB
 }
 
-type User struct {
-	ID       int
-	Username string
-	Password string
-}
-
-type Session struct {
-	ID        string
-	UserID    int
-	CSRFToken string
-	ExpiresAt time.Time
-	CreatedAt time.Time
-}
-
-type NFeHeader struct {
-	ID          string
-	CUF         string
-	CNF         string
-	NatOp       string
-	IndPag      int
-	Mod         string
-	Serie       string
-	NNF         string
-	DEmi        string
-	DSaiEnt     string
-	TpNF        int
-	CMunFG      string
-	TpImp       int
-	TpEmis      int
-	CDV         int
-	TpAmb       int
-	FinNFe      int
-	ProcEmi     int
-	VerProc     string
-	EmitCNPJ    string
-	EmitXNome   string
-	EmitXLgr    string
-	EmitNro     string
-	EmitXBairro string
-	EmitCMun    string
-	EmitXMun    string
-	EmitUF      string
-	EmitCEP     string
-	DestCNPJ    string
-	DestXNome   string
-	DestXLgr    string
-	DestNro     string
-	DestXBairro string
-	DestCMun    string
-	DestXMun    string
-	DestUF      string
-	DestCEP     string
-	VBC         float64
-	VICMS       float64
-	VProd       float64
-	VPIS        float64
-	VCOFINS     float64
-	VNF         float64
-}
-
-type NFeItem struct {
-	NFeID   string
-	NItem   int
-	CProd   string
-	XProd   string
-	CFOP    string
-	UCom    string
-	QCom    float64
-	VUnCom  float64
-	VProd   float64
-	VBC     float64
-	PICMS   float64
-	VICMS   float64
-	PPIS    float64
-	VPIS    float64
-	PCOFINS float64
-	VCOFINS float64
-}
-
-func NewDBConn(dbPath string) (*DBConn, error) {
+func NewDBConn(dbPath string) (*DBConnSQLite, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
@@ -190,15 +112,15 @@ func NewDBConn(dbPath string) (*DBConn, error) {
 		return nil, err
 	}
 
-	return &DBConn{db: db}, nil
+	return &DBConnSQLite{db: db}, nil
 }
 
-func (d *DBConn) Close() error {
+func (d *DBConnSQLite) Close() error {
 	return d.db.Close()
 }
 
-func (d *DBConn) ValidateUser(username, password string) (*User, error) {
-	var user User
+func (d *DBConnSQLite) ValidateUser(username, password string) (*entity.User, error) {
+	var user entity.User
 	err := d.db.QueryRow(`
 		SELECT id, username, password FROM users WHERE username = ?
 	`, username).Scan(&user.ID, &user.Username, &user.Password)
@@ -211,15 +133,15 @@ func (d *DBConn) ValidateUser(username, password string) (*User, error) {
 	return &user, nil
 }
 
-func (d *DBConn) CreateSession(userID int, sessionID, csrfToken string, expiresAt time.Time) error {
+func (d *DBConnSQLite) CreateSession(userID int, sessionID, csrfToken string, expiresAt time.Time) error {
 	_, err := d.db.Exec(`
 		INSERT INTO sessions (id, user_id, csrf_token, expires_at) VALUES (?, ?, ?, ?)
 	`, sessionID, userID, csrfToken, expiresAt)
 	return err
 }
 
-func (d *DBConn) GetSession(sessionID string) (*Session, error) {
-	var session Session
+func (d *DBConnSQLite) GetSession(sessionID string) (*entity.Session, error) {
+	var session entity.Session
 	err := d.db.QueryRow(`
 		SELECT id, user_id, csrf_token, expires_at, created_at FROM sessions WHERE id = ?
 	`, sessionID).Scan(&session.ID, &session.UserID, &session.CSRFToken, &session.ExpiresAt, &session.CreatedAt)
@@ -229,21 +151,21 @@ func (d *DBConn) GetSession(sessionID string) (*Session, error) {
 	return &session, nil
 }
 
-func (d *DBConn) DeleteSession(sessionID string) error {
+func (d *DBConnSQLite) DeleteSession(sessionID string) error {
 	_, err := d.db.Exec(`
 		DELETE FROM sessions WHERE id = ?
 	`, sessionID)
 	return err
 }
 
-func (d *DBConn) CleanupExpiredSessions() error {
+func (d *DBConnSQLite) CleanupExpiredSessions() error {
 	_, err := d.db.Exec(`
 		DELETE FROM sessions WHERE expires_at < datetime('now')
 	`)
 	return err
 }
 
-func (d *DBConn) InsertNFeHeader(header *NFeHeader) error {
+func (d *DBConnSQLite) InsertNFeHeader(header *entity.NFeHeader) error {
 	_, err := d.db.Exec(`
 		INSERT INTO nfe_headers (
 			id, cuf, cnf, nat_op, ind_pag, mod, serie, nnf, d_emi, d_sai_ent, tp_nf,
@@ -264,7 +186,7 @@ func (d *DBConn) InsertNFeHeader(header *NFeHeader) error {
 	return err
 }
 
-func (d *DBConn) InsertNFeItem(item *NFeItem) error {
+func (d *DBConnSQLite) InsertNFeItem(item *entity.NFeItem) error {
 	_, err := d.db.Exec(`
 		INSERT INTO nfe_items (
 			nfe_id, n_item, c_prod, x_prod, cfop, u_com, q_com, v_un_com, v_prod,
@@ -276,7 +198,7 @@ func (d *DBConn) InsertNFeItem(item *NFeItem) error {
 	return err
 }
 
-func (d *DBConn) NFeExists(id string) (bool, error) {
+func (d *DBConnSQLite) NFeExists(id string) (bool, error) {
 	var count int
 	err := d.db.QueryRow(`SELECT COUNT(*) FROM nfe_headers WHERE id = ?`, id).Scan(&count)
 	if err != nil {
