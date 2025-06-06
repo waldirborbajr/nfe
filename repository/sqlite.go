@@ -4,12 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"time"
 
-	"github.com/waldirborbajr/nfe/entity"
 	_ "modernc.org/sqlite"
+
+	"github.com/waldirborbajr/nfe/entity"
 )
 
 // DB abstracts database operations for testability.
@@ -53,26 +54,18 @@ func NewDBConnSQLite(path string) (DB, error) {
 		return nil, fmt.Errorf("failed to set journal mode: %w", err)
 	}
 
-	schemeFile, err := os.Open(config.Scheme)
+	schemeFile, err := os.Open("scheme.sql")
 	if err != nil {
 		panic(err)
 	}
 	defer schemeFile.Close()
-	scheme, err := ioutil.ReadAll(schemeFile)
+	scheme, err := io.ReadAll(schemeFile)
 	if err != nil {
 		panic(err)
 	}
 
 	// Create tables
 	db.Exec(string(scheme))
-
-	// Insert default user if not exists
-	_, err = db.Exec(`
-		INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)
-	`, "admin", "admin123")
-	if err != nil {
-		return nil, err
-	}
 
 	return &DBConnSQLite{db: db}, nil
 }
