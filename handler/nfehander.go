@@ -38,7 +38,7 @@ func ImportNFeHandler(db *repository.SQLiteDBRepository) http.HandlerFunc {
 			return
 		}
 
-		downloadsDir := filepath.Join(os.Getenv("HOME"), "nferepo")
+		downloadsDir := fmt.Sprintf("nferepo")
 		doneDir := filepath.Join(downloadsDir, "done")
 
 		// Create done directory
