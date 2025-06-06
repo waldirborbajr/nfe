@@ -13,6 +13,7 @@ import (
 
 	"github.com/waldirborbajr/nfe/entity"
 	"github.com/waldirborbajr/nfe/handler"
+	"github.com/waldirborbajr/nfe/middleware"
 	"github.com/waldirborbajr/nfe/repository"
 	"gopkg.in/yaml.v3"
 )
@@ -110,7 +111,7 @@ func main() {
 	mux.HandleFunc("/import", handler.ImportNFeHandler(db.(*repository.SQLiteDBRepository)))
 
 	// Apply secure headers middleware
-	securedHandler := handler.SecureHeadersMiddleware(mux, config)
+	securedHandler := middleware.SecureHeadersMiddleware(mux, config)
 
 	if config.Production {
 		certPath := filepath.Join("certs", "server.crt")
