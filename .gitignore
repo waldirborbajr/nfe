@@ -3,3 +3,4 @@ certs
 go1.24.3.linux-amd64.tar.gz
 database.db-shm
 database.db-wal
+tailwindcss
