@@ -16,6 +16,7 @@ import (
 
 	"github.com/waldirborbajr/nfe/entity"
 	"github.com/waldirborbajr/nfe/repository"
+	"github.com/waldirborbajr/nfe/response"
 )
 
 // SecureHeadersMiddleware is a middleware that sets various HTTP security headers on the response.
@@ -109,9 +110,9 @@ func createTLSClient(cert *tls.Certificate) *http.Client {
 }
 
 // consultNFe consults an NF-e at SEFAZ webservice
-func consultNFe(client *http.Client, sefazURL, chaveNFe string) (entity.NFeResponse, error) {
+func consultNFe(client *http.Client, sefazURL, chaveNFe string) (response.NFeResponse, error) {
 	if !regexp.MustCompile(`^\d{44}$`).MatchString(chaveNFe) {
-		return entity.NFeResponse{}, fmt.Errorf("chave NF-e inválida")
+		return response.NFeResponse{}, fmt.Errorf("chave NF-e inválida")
 	}
 
 	soapRequest := `<?xml version="1.0" encoding="UTF-8"?>
@@ -135,7 +136,7 @@ func consultNFe(client *http.Client, sefazURL, chaveNFe string) (entity.NFeRespo
 
 	req, err := http.NewRequest("POST", sefazURL, strings.NewReader(soapRequest))
 	if err != nil {
-		return entity.NFeResponse{}, fmt.Errorf("erro ao criar requisição: %v", err)
+		return response.NFeResponse{}, fmt.Errorf("erro ao criar requisição: %v", err)
 	}
 
 	req.Header.Set("Content-Type", "application/soap+xml; charset=utf-8")
@@ -143,16 +144,16 @@ func consultNFe(client *http.Client, sefazURL, chaveNFe string) (entity.NFeRespo
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return entity.NFeResponse{}, fmt.Errorf("erro ao consultar NF-e: %v", err)
+		return response.NFeResponse{}, fmt.Errorf("erro ao consultar NF-e: %v", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return entity.NFeResponse{}, fmt.Errorf("erro ao ler resposta: %v", err)
+		return response.NFeResponse{}, fmt.Errorf("erro ao ler resposta: %v", err)
 	}
 
-	nfe := entity.NFeResponse{
+	nfe := response.NFeResponse{
 		ChaveNFe:    chaveNFe,
 		Status:      "Autorizada",
 		Descricao:   "Nota fiscal autorizada com sucesso",
@@ -246,7 +247,7 @@ func UploadHandler(config entity.Config, db *repository.SQLiteDBRepository) http
 			"35230698765432109876543210987654321098765432",
 		}
 
-		var nfeResponses []entity.NFeResponse
+		var nfeResponses []response.NFeResponse
 		for _, chave := range chavesNFe {
 			nfe, err := consultNFe(client, config.SefazURL, chave)
 			if err != nil {
