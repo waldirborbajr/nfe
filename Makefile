@@ -32,11 +32,11 @@ tailwind-build: ## one-time compile tailwindcss styles
 build: ## compile tailwindcss and templ files and build the project
 	./tailwindcss -i ./static/css/custom.css -o ./static/css/style.css
 	templ generate
-	go build -o ./tmp/$(APP_NAME) ./cmd/$(APP_NAME)/main.go
+	go build -o ./tmp/$(APP_NAME) ./cmd/api/main.go
 
 .PHONY: watch
 watch: ## build and watch the project with air
-	go build -o ./tmp/$(APP_NAME) ./cmd/$(APP_NAME)/main.go && air
+	go build -o ./tmp/$(APP_NAME) ./cmd/api/main.go && air
 
 .PHONY: templ-generate
 templ-generate:
