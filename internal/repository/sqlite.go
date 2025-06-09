@@ -10,7 +10,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/waldirborbajr/nfe/entity"
+	"github.com/waldirborbajr/nfe/internal/entity"
 )
 
 // DB abstracts database operations for testability.

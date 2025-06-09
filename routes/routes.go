@@ -5,7 +5,7 @@ import (
 
 	"github.com/waldirborbajr/nfe/internal/config"
 	"github.com/waldirborbajr/nfe/handler"
-	"github.com/waldirborbajr/nfe/repository"
+	"github.com/waldirborbajr/nfe/internal/repository"
 )
 
 // SecureHeadersMiddleware adds security headers to all responses.

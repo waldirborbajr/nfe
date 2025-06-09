@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/waldirborbajr/nfe/entity"
-	"github.com/waldirborbajr/nfe/repository"
+	"github.com/waldirborbajr/nfe/internal/entity"
+	"github.com/waldirborbajr/nfe/internal/repository"
 )
 
 // ImportNFeHandler handles XML file listing and importing

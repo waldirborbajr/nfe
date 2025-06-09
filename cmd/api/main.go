@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/waldirborbajr/nfe/internal/config"
-	"github.com/waldirborbajr/nfe/repository"
+	"github.com/waldirborbajr/nfe/internal/repository"
 	"github.com/waldirborbajr/nfe/routes"
 	"github.com/waldirborbajr/nfe/server"
 )
