@@ -11,9 +11,8 @@ import (
 type Config struct {
 	SefazURL   string `yaml:"sefazUrl"`   // URL do SEFAZ
 	Production bool   `yaml:"production"` // Indica se o sistema está em produção
-
-	HttpPort  string `yaml:"httpPort"`  // Porta HTTP do servidor
-	HttpsPort string `yaml:"httpsPort"` // Porta HTTPS do servidor
+	HttpPort   string `yaml:"httpPort"`   // Porta HTTP do servidor
+	HttpsPort  string `yaml:"httpsPort"`  // Porta HTTPS do servidor
 }
 
 func LoadConfig() (Config, error) {

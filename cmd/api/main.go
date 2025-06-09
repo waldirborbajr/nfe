@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -54,7 +53,6 @@ func main() {
 		server.RunNFeServer(srv, true, certPath, keyPath)
 	} else {
 		httpPort := config.HttpPort
-		fmt.Println(httpPort)
 		srv := server.CreateNFeHTTPServer(httpPort, handlerWithSecurity)
 		server.RunNFeServer(srv, false, "", "")
 	}
