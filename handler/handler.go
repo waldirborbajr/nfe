@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/waldirborbajr/nfe/internal/config"
 	"github.com/waldirborbajr/nfe/entity"
 	"github.com/waldirborbajr/nfe/repository"
 	"github.com/waldirborbajr/nfe/response"
@@ -137,7 +138,7 @@ func consultNFe(client *http.Client, sefazURL, chaveNFe string) (response.NFeRes
 }
 
 // UploadHandler handles certificate upload and NF-e consultation
-func UploadHandler(config entity.Config, db *repository.SQLiteDBRepository) http.HandlerFunc {
+func UploadHandler(config config.Config, db *repository.SQLiteDBRepository) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("UploadHandler: Database connection is nil")
@@ -248,7 +249,7 @@ func UploadHandler(config entity.Config, db *repository.SQLiteDBRepository) http
 //
 // Returns:
 //   - http.HandlerFunc: The handler function for the login endpoint.
-func LoginHandler(db *repository.SQLiteDBRepository, config entity.Config) http.HandlerFunc {
+func LoginHandler(db *repository.SQLiteDBRepository, config config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("LoginHandler: Database connection is nil")
@@ -295,7 +296,7 @@ func LoginHandler(db *repository.SQLiteDBRepository, config entity.Config) http.
 }
 
 // LoginSubmitHandler processes login form submissions
-func LoginSubmitHandler(db *repository.SQLiteDBRepository, config entity.Config) http.HandlerFunc {
+func LoginSubmitHandler(db *repository.SQLiteDBRepository, config config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("LoginSubmitHandler: Database connection is nil")
@@ -370,7 +371,7 @@ func LoginSubmitHandler(db *repository.SQLiteDBRepository, config entity.Config)
 }
 
 // LogoutHandler clears the session
-func LogoutHandler(db *repository.SQLiteDBRepository, config entity.Config) http.HandlerFunc {
+func LogoutHandler(db *repository.SQLiteDBRepository, config config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if db == nil {
 			log.Println("LogoutHandler: Database connection is nil")

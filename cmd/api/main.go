@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/waldirborbajr/nfe/config"
+	"github.com/waldirborbajr/nfe/internal/config"
 	"github.com/waldirborbajr/nfe/repository"
 	"github.com/waldirborbajr/nfe/routes"
 	"github.com/waldirborbajr/nfe/server"
@@ -46,14 +47,15 @@ func main() {
 	handlerWithSecurity := routes.NewRouter(db, config)
 
 	if config.Production {
-		httpsPort := config.HttsPort
+		httpsPort := config.HttpsPort
 		certPath := filepath.Join("certs", "server.crt")
 		keyPath := filepath.Join("certs", "server.key")
 		srv := server.CreateNFeHTTPServer(httpsPort, handlerWithSecurity)
 		server.RunNFeServer(srv, true, certPath, keyPath)
 	} else {
 		httpPort := config.HttpPort
-		srv := server.CreateNFeHTTPServer(httpsPort, handlerWithSecurity)
+		fmt.Println(httpPort)
+		srv := server.CreateNFeHTTPServer(httpPort, handlerWithSecurity)
 		server.RunNFeServer(srv, false, "", "")
 	}
 }

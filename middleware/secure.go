@@ -2,8 +2,6 @@ package middleware
 
 import (
 	"net/http"
-
-	"github.com/waldirborbajr/nfe/entity"
 )
 
 // SecureHeadersMiddleware is a middleware that sets various HTTP security headers on the response.
@@ -11,7 +9,7 @@ import (
 // In non-production mode, it sets a more permissive CSP to facilitate development.
 // The middleware also sets headers to prevent MIME sniffing, clickjacking, and cross-site scripting (XSS) attacks.
 // It takes the next http.Handler to call and a configuration struct to determine the environment.
-func SecureHeadersMiddleware(next http.Handler, config entity.Config) http.Handler {
+func SecureHeadersMiddleware(next http.Handler, config config.Config) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if config.Production {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")

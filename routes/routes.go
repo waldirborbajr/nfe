@@ -3,13 +3,13 @@ package routes
 import (
 	"net/http"
 
-	"github.com/waldirborbajr/nfe/entity"
+	"github.com/waldirborbajr/nfe/internal/config"
 	"github.com/waldirborbajr/nfe/handler"
 	"github.com/waldirborbajr/nfe/repository"
 )
 
 // SecureHeadersMiddleware adds security headers to all responses.
-func SecureHeadersMiddleware(next http.Handler, config entity.Config) http.Handler {
+func SecureHeadersMiddleware(next http.Handler, config config.Config) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -20,7 +20,7 @@ func SecureHeadersMiddleware(next http.Handler, config entity.Config) http.Handl
 	})
 }
 
-func NewRouter(db repository.DB, config entity.Config) http.Handler {
+func NewRouter(db repository.DB, config config.Config) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 	sqliteDB, ok := db.(*repository.SQLiteDBRepository)

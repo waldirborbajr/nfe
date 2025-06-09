@@ -1,4 +1,4 @@
 sefaz_url: https://nfe.sefazrs.rs.gov.br/ws/NfeConsulta/NfeConsulta4.asmx
 production: false
-http_port: 8080
-https_port: 8043
+http_port: :8080
+https_port: :8043
