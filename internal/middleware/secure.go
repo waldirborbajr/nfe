@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"net/http"
+
+	"github.com/waldirborbajr/nfe/internal/config"
 )
 
 // SecureHeadersMiddleware is a middleware that sets various HTTP security headers on the response.
