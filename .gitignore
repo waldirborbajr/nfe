@@ -7,3 +7,4 @@ tailwindcss
 views/header_templ.go
 views/components/footer_templ.go
 views/components/header_templ.go
+.vscode/
