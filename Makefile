@@ -1,71 +1,48 @@
-# Simple Makefile for a Go project
+.PHONY: help
+help: ## print make targets 
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
-# Build the application
-all: build test
+.PHONY: go-install-air
+go-install-air: ## Installs the air build reload system using 'go install'
+	go install github.com/air-verse/air@latest
 
-templ-install:
-	@if ! command -v templ > /dev/null; then \
-		read -p "Go's 'templ' is not installed on your machine. Do you want to install it? [Y/n] " choice; \
-		if [ "$$choice" != "n" ] && [ "$$choice" != "N" ]; then \
-			go install github.com/a-h/templ/cmd/templ@latest; \
-			if [ ! -x "$$(command -v templ)" ]; then \
-				echo "[Make] templ installation failed. Exiting..."; \
-				exit 1; \
-			fi; \
-		else \
-			echo "[Make] You chose not to install templ. Exiting..."; \
-			exit 1; \
-		fi; \
-	fi
+.PHONY: get-install-air
+get-install-air: ## Installs the air build reload system using cUrl
+	curl -sSfL https://raw.githubusercontent.com/air-verse/air/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
 
-tailwind:
-	@if [ ! -f tailwindcss ]; then curl -sL https://github.com/tailwindlabs/tailwindcss/releases/latest/download/tailwindcss-linux-x64 -o tailwindcss; fi
+.PHONY: go-install-templ
+go-install-templ: ## Installs the templ Templating system for Go
+	go install github.com/a-h/templ/cmd/templ@latest
 
-	@chmod +x tailwindcss
+.PHONY: get-install-tailwindcss
+get-install-tailwindcss: ## Installs the tailwindcss cli
+	curl -sLO https://github.com/tailwindlabs/tailwindcss/releases/latest/download/tailwindcss-linux-x64
+	chmod +x tailwindcss-linux-x64
+	mv tailwindcss-linux-x64 tailwindcss
 
-build: tailwind templ-install
-	@echo "[Make] Building Templ"
-	@templ generate
+.PHONY: tailwind-watch
+tailwind-watch: ## compile tailwindcss and watch for changes
+	./tailwindcss -i ./static/css/custom.css -o ./static/css/style.css --watch
 
-	@echo "[Make] Building tailwindcss"
-	@./tailwindcss -i views/assets/css/input.css -o views/assets/css/output.css
+.PHONY: tailwind-build
+tailwind-build: ## one-time compile tailwindcss styles
+	./tailwindcss -i ./static/css/custom.css -o ./static/css/style.css
 
-	@echo "[Make] Building GO"
-	@go build -o dist/main cmd/api/main.go
+.PHONY: build
+build: ## compile tailwindcss and templ files and build the project
+	./tailwindcss -i ./static/css/custom.css -o ./static/css/style.css
+	templ generate
+	go build -o ./tmp/$(APP_NAME) ./cmd/$(APP_NAME)/main.go
 
-	@echo "[Make] Build Completed..."
+.PHONY: watch
+watch: ## build and watch the project with air
+	go build -o ./tmp/$(APP_NAME) ./cmd/$(APP_NAME)/main.go && air
 
-# Run the application
-run:
-	@go run cmd/api/main.go
+.PHONY: templ-generate
+templ-generate:
+	templ generate
 
-# Test the application
-test:
-	@echo "[Make] Testing..."
-	@go test ./... -v
+.PHONY: templ-watch
+templ-watch:
+	templ generate --watch
 
-# Clean the binary
-clean:
-	@echo "[Make] Cleaning..."
-	@rm -rf dist
-	@rm -rf tmp
-	@rm -rf log/*
-
-# Live Reload
-watch:
-	@if command -v air > /dev/null; then \
-            air; \
-            echo "[Make] Watching...";\
-        else \
-            read -p "Go's 'air' is not installed on your machine. Do you want to install it? [Y/n] " choice; \
-            if [ "$$choice" != "n" ] && [ "$$choice" != "N" ]; then \
-                go install github.com/air-verse/air@latest; \
-                air; \
-                echo "[Make] Watching...";\
-            else \
-                echo "[Make] You chose not to install air. Exiting..."; \
-                exit 1; \
-            fi; \
-        fi
-
-.PHONY: all build run test clean watch tailwind templ-install
