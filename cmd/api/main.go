@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -15,16 +16,18 @@ import (
 const sessionCleanupInterval = time.Hour
 
 func main() {
+	logger := log.New(os.Stdout, "[NFe] ", log.LstdFlags)
+
 	// Load configuration
 	config, err := config.LoadConfig()
 	if err != nil {
-		log.Fatalf("⚠ Erro ao carregar configuração: %v", err)
+		logger.Fatalf("⚠ Erro ao carregar configuração: %v", err)
 	}
 
 	// Initialize repository (now returns repository.DB interface)
 	db, err := repository.NewDBConnSQLite("database.db")
 	if err != nil {
-		log.Fatalf("⚠ Erro ao inicializar banco de dados: %v", err)
+		logger.Fatalf("⚠ Erro ao inicializar banco de dados: %v", err)
 	}
 	defer db.Close()
 
@@ -33,7 +36,7 @@ func main() {
 		ctx := context.Background()
 		for {
 			if err := db.CleanupExpiredSessions(ctx); err != nil {
-				log.Printf("⚠ Erro ao limpar sessões expiradas: %v", err)
+				logger.Printf("⚠ Erro ao limpar sessões expiradas: %v", err)
 			}
 			time.Sleep(sessionCleanupInterval)
 		}
@@ -43,12 +46,14 @@ func main() {
 	handlerWithSecurity := routes.NewRouter(db, config)
 
 	if config.Production {
+		httpsPort := config.HttsPort
 		certPath := filepath.Join("certs", "server.crt")
 		keyPath := filepath.Join("certs", "server.key")
-		srv := server.CreateNFeHTTPServer(":4043", handlerWithSecurity)
+		srv := server.CreateNFeHTTPServer(httpsPort, handlerWithSecurity)
 		server.RunNFeServer(srv, true, certPath, keyPath)
 	} else {
-		srv := server.CreateNFeHTTPServer(":8080", handlerWithSecurity)
+		httpPort := config.HttpPort
+		srv := server.CreateNFeHTTPServer(httpsPort, handlerWithSecurity)
 		server.RunNFeServer(srv, false, "", "")
 	}
 }
