@@ -90,3 +90,6 @@ MIT
 ---
 
 **Made with Go and
+
+https://github.com/chatzijohn/htmx-go-app
+
