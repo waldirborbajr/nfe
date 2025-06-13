@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/waldirborbajr/nfe/internal/config"
-	"github.com/waldirborbajr/nfe/handler"
+	"github.com/waldirborbajr/nfe/internal/handler"
 	"github.com/waldirborbajr/nfe/internal/repository"
 )
 

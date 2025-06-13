@@ -10,7 +10,7 @@ import (
 	"github.com/waldirborbajr/nfe/internal/config"
 	"github.com/waldirborbajr/nfe/internal/repository"
 	"github.com/waldirborbajr/nfe/internal/server"
-	"github.com/waldirborbajr/nfe/routes"
+	"github.com/waldirborbajr/nfe/internal/routes"
 )
 
 const sessionCleanupInterval = time.Hour
