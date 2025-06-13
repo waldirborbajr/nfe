@@ -93,3 +93,4 @@ MIT
 
 https://github.com/chatzijohn/htmx-go-app
 
+https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot

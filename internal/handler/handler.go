@@ -17,7 +17,7 @@ import (
 	"github.com/waldirborbajr/nfe/internal/config"
 	"github.com/waldirborbajr/nfe/internal/entity"
 	"github.com/waldirborbajr/nfe/internal/repository"
-	"github.com/waldirborbajr/nfe/response"
+	"github.com/waldirborbajr/nfe/internal/response"
 )
 
 // validateInput sanitizes and validates input
